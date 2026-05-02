@@ -1,0 +1,59 @@
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+
+# Database
+asyncpg==0.30.0
+sqlalchemy[asyncio]==2.0.36
+alembic==1.14.0
+
+# Validation & config
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Redis
+redis[asyncio]==5.2.1
+
+# Scheduler
+apscheduler==3.10.4
+
+# Market data
+yfinance==0.2.51
+pandas==2.2.3
+numpy==2.2.0
+
+# Technical analysis
+pandas-ta==0.3.14b0
+
+# Market calendars (Euronext, Xetra)
+exchange-calendars==4.5.7
+
+# Sentiment / RSS
+feedparser==6.0.11
+
+# Macro data
+fredapi==0.5.2
+
+# LLM
+openai==1.58.1
+
+# Telegram
+python-telegram-bot==21.9
+
+# HTTP client
+httpx==0.28.1
+
+# Logging
+structlog==24.4.0
+
+# Utils
+python-dotenv==1.0.1
+python-dateutil==2.9.0
+pytz==2024.2
+
+# Tests
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-mock==3.14.0
+httpx==0.28.1

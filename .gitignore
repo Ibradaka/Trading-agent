@@ -1,0 +1,55 @@
+# ===== SECRETS — ne JAMAIS commiter =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+nginx/ssl/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# ===== Node.js / Next.js =====
+node_modules/
+.next/
+out/
+.npm
+*.tsbuildinfo
+
+# ===== Docker =====
+docker-compose.override.yml
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ===== IDE =====
+.idea/
+.vscode/settings.json
+*.iml
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Alembic =====
+# Ne pas ignorer les migrations — les commiter
