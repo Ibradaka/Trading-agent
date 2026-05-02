@@ -24,7 +24,7 @@ pandas==2.2.3
 numpy==2.2.0
 
 # Technical analysis
-git+https://github.com/twopirllc/pandas-ta.git@development#egg=pandas-ta
+pandas-ta
 
 # Market calendars (Euronext, Xetra)
 exchange-calendars==4.5.7
