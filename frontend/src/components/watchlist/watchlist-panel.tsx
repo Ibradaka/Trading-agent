@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { api, type WatchlistSignalEntry, type AssetQuote } from "@/lib/api";
+import { api, type WatchlistSignalEntry, type AssetQuote, type Position } from "@/lib/api";
 import { useState } from "react";
 import { Plus, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import Link from "next/link";
@@ -121,7 +121,36 @@ function PriceCell({ ticker }: { ticker: string }) {
   );
 }
 
-function AssetRow({ entry }: { entry: WatchlistSignalEntry }) {
+function PnLCell({ ticker, position }: { ticker: string; position: Position | undefined }) {
+  const { data: quote } = useQuery<AssetQuote>({
+    queryKey: ["quote", ticker],
+    queryFn: () => api.assets.quote(ticker),
+    staleTime: 30_000,
+    enabled: !!position,
+  });
+
+  if (!position || !quote?.current_price) return <span className="text-slate-700 text-xs">—</span>;
+
+  const isGBp = quote.currency === "GBp";
+  const current = isGBp ? quote.current_price / 100 : quote.current_price;
+  const avg = isGBp ? position.avg_price / 100 : position.avg_price;
+  const pnl = (current - avg) * position.quantity;
+  const pnl_pct = avg > 0 ? ((current - avg) / avg) * 100 : 0;
+  const positive = pnl >= 0;
+
+  return (
+    <div>
+      <p className={cn("text-sm font-mono font-semibold", positive ? "text-emerald-400" : "text-red-400")}>
+        {positive ? "+" : ""}{pnl.toFixed(2)}
+      </p>
+      <p className={cn("text-xs font-mono", positive ? "text-emerald-400/70" : "text-red-400/70")}>
+        {positive ? "+" : ""}{pnl_pct.toFixed(2)}%
+      </p>
+    </div>
+  );
+}
+
+function AssetRow({ entry, position }: { entry: WatchlistSignalEntry; position: Position | undefined }) {
   const { ticker, name, is_pea_eligible, asset_type, signal } = entry;
 
   return (
@@ -152,6 +181,11 @@ function AssetRow({ entry }: { entry: WatchlistSignalEntry }) {
       {/* Prix + sparkline */}
       <div className="flex-1">
         <PriceCell ticker={ticker} />
+      </div>
+
+      {/* P&L si position ouverte */}
+      <div className="w-24 flex-shrink-0 text-right">
+        <PnLCell ticker={ticker} position={position} />
       </div>
 
       {/* Signal */}
@@ -195,6 +229,12 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
     refetchInterval: 60_000,
   });
 
+  const { data: positions = [] } = useQuery({
+    queryKey: ["positions"],
+    queryFn: api.portfolio.positions,
+    staleTime: 60_000,
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -227,11 +267,16 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
         <span className="w-28">Actif</span>
         <span className="w-20">Type</span>
         <span className="flex-1">Prix · 1J / 1S / 1M</span>
+        <span className="w-24 text-right">P&L position</span>
         <span className="w-28 text-center">Signal</span>
         <span className="w-16 text-right">Score</span>
       </div>
       {sorted.map((entry) => (
-        <AssetRow key={entry.ticker} entry={entry} />
+        <AssetRow
+          key={entry.ticker}
+          entry={entry}
+          position={positions.find((p) => p.ticker === entry.ticker && p.is_active)}
+        />
       ))}
     </div>
   );

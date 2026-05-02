@@ -7,7 +7,7 @@ from app.config import settings
 from app.database import init_db, close_db
 from app.services.redis_client import init_redis, close_redis
 from app.services.scheduler import start_scheduler, stop_scheduler
-from app.routers import watchlist, signals, assets, sse
+from app.routers import watchlist, signals, assets, sse, portfolio
 from app.seed import run_seed
 
 logger = structlog.get_logger()
@@ -49,6 +49,7 @@ app.include_router(watchlist.router, prefix="/api/watchlists", tags=["watchlists
 app.include_router(signals.router, prefix="/api/signals", tags=["signals"])
 app.include_router(assets.router, prefix="/api/assets", tags=["assets"])
 app.include_router(sse.router, prefix="/api/stream", tags=["stream"])
+app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 
 
 @app.get("/health", tags=["system"])

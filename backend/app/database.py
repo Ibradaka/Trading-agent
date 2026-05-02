@@ -27,9 +27,11 @@ class Base(DeclarativeBase):
 
 
 async def init_db() -> None:
-    """Vérifie la connexion DB au démarrage."""
+    """Crée les tables manquantes et vérifie la connexion DB."""
+    import app.models.db  # noqa — enregistre tous les modèles dans Base.metadata
     async with engine.begin() as conn:
-        logger.info("Database connection established")
+        await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables verified")
 
 
 async def close_db() -> None:

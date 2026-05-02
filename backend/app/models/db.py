@@ -46,6 +46,7 @@ class Asset(Base):
 
     watchlists = relationship("WatchlistAsset", back_populates="asset")
     signals = relationship("Signal", back_populates="asset", cascade="all, delete-orphan")
+    positions = relationship("Position", back_populates="asset", cascade="all, delete-orphan")
 
 
 class WatchlistAsset(Base):
@@ -199,6 +200,23 @@ class SignalOutcome(Base):
     notes = Column(Text)
 
     signal = relationship("Signal", back_populates="outcome")
+
+
+class Position(Base):
+    """Position ouverte dans un compte (PEA, CTO, PEE, AUTRE)."""
+    __tablename__ = "positions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    asset_id = Column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
+    account_type = Column(String(10), nullable=False)  # PEA, PEE, CTO, AUTRE
+    quantity = Column(DECIMAL(16, 6), nullable=False)
+    avg_price = Column(DECIMAL(16, 6), nullable=False)
+    opened_at = Column(TIMESTAMPTZ, server_default=func.now())
+    notes = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(TIMESTAMPTZ, server_default=func.now())
+
+    asset = relationship("Asset", back_populates="positions")
 
 
 class AlertConfig(Base):

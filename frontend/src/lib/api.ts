@@ -124,6 +124,21 @@ export interface NewsItem {
   published_at: number | null;
 }
 
+export interface Position {
+  id: string;
+  asset_id: string;
+  ticker: string;
+  asset_name: string;
+  account_type: "PEA" | "PEE" | "CTO" | "AUTRE";
+  quantity: number;
+  avg_price: number;
+  currency: string | null;
+  is_pea_eligible: boolean;
+  opened_at: string | null;
+  notes: string | null;
+  is_active: boolean;
+}
+
 export interface WatchlistSignalEntry {
   ticker: string;
   name: string;
@@ -181,6 +196,31 @@ export const api = {
     history: (ticker: string, limit = 20) =>
       request<Signal[]>(`/api/signals/${ticker}/history?limit=${limit}`),
     active: () => request<Signal[]>("/api/signals/active"),
+  },
+
+  portfolio: {
+    positions: () => request<Position[]>("/api/portfolio/positions"),
+    addPosition: (data: {
+      ticker: string;
+      account_type: string;
+      quantity: number;
+      avg_price: number;
+      notes?: string;
+    }) =>
+      request<Position>("/api/portfolio/positions", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    updatePosition: (
+      id: string,
+      data: Partial<{ account_type: string; quantity: number; avg_price: number; notes: string }>
+    ) =>
+      request<Position>(`/api/portfolio/positions/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    deletePosition: (id: string) =>
+      request<{ deleted: boolean }>(`/api/portfolio/positions/${id}`, { method: "DELETE" }),
   },
 
   health: () => request<{ status: string; version: string }>("/health"),
