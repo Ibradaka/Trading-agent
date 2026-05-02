@@ -20,8 +20,8 @@ apscheduler==3.10.4
 
 # Market data
 yfinance==0.2.51
-pandas==2.2.3
-numpy==2.2.0
+pandas>=2.2.3
+numpy>=2.2.6
 
 # Technical analysis
 pandas-ta>=0.4.67b0
