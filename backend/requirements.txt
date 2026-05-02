@@ -24,7 +24,7 @@ pandas==2.2.3
 numpy==2.2.0
 
 # Technical analysis
-pandas-ta
+pandas-ta>=0.4.67b0
 
 # Market calendars (Euronext, Xetra)
 exchange-calendars==4.5.7
