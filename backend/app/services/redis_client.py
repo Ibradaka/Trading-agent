@@ -11,7 +11,7 @@ _client: Optional[redis.Redis] = None
 
 async def init_redis() -> None:
     global _client
-    _client = redis.from_url(settings.redis_url, decode_responses=True)
+    _client = redis.from_url(settings.redis_url_with_auth, decode_responses=True)
     await _client.ping()
     logger.info("Redis connection established")
 

@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     redis_password: str = ""
 
+    @property
+    def redis_url_with_auth(self) -> str:
+        if self.redis_password:
+            return f"redis://:{self.redis_password}@redis:6379/0"
+        return self.redis_url
+
     # Data sources
     fred_api_key: str = ""
     alpha_vantage_key: str = ""
