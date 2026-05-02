@@ -1,4 +1,7 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8899";
+// Browser: relative URLs proxied by Next.js. SSR: internal backend URL.
+const API_BASE = typeof window !== "undefined"
+  ? ""
+  : (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8899");
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {

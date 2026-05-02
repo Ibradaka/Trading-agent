@@ -8,6 +8,7 @@ from app.database import init_db, close_db
 from app.services.redis_client import init_redis, close_redis
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.routers import watchlist, signals, assets, sse
+from app.seed import run_seed
 
 logger = structlog.get_logger()
 
@@ -17,6 +18,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Trading Agent API", version="1.0.0-beta", env=settings.app_env)
     await init_db()
     await init_redis()
+    await run_seed()
     await start_scheduler()
     logger.info("All services started — ready to trade")
     yield
