@@ -34,28 +34,29 @@ def _fetch_info(ticker: str) -> dict:
 
 
 async def run_seed() -> None:
-    async with AsyncSessionLocal() as session:
-        count = (await session.execute(select(func.count(Watchlist.id)))).scalar()
-        if count > 0:
-            return
+    try:
+        async with AsyncSessionLocal() as session:
+            count = (await session.execute(select(func.count(Watchlist.id)))).scalar()
+            if count > 0:
+                return
 
-        watchlist = Watchlist(
-            id=uuid.uuid4(),
-            name="Mon PEA",
-            description="Métaux précieux — ETCs iShares",
-            refresh_interval_minutes=15,
-            signal_threshold=70,
-        )
-        session.add(watchlist)
-        await session.flush()
+            watchlist = Watchlist(
+                id=uuid.uuid4(),
+                name="Mon PEA",
+                description="Métaux précieux — ETCs iShares",
+                refresh_interval_minutes=15,
+                signal_threshold=70,
+            )
+            session.add(watchlist)
+            await session.flush()
 
-        for ticker, notes, pea in DEFAULT_TICKERS:
-            try:
+            for ticker, notes, pea in DEFAULT_TICKERS:
                 info = await asyncio.to_thread(_fetch_info, ticker)
                 if not info["price"]:
                     logger.warning("Seed: ticker sans prix", ticker=ticker)
                     continue
 
+                # Re-query dans la même session pour éviter race condition
                 existing = (await session.execute(select(Asset).where(Asset.ticker == ticker))).scalar_one_or_none()
                 if existing is None:
                     existing = Asset(
@@ -73,12 +74,21 @@ async def run_seed() -> None:
                     session.add(existing)
                     await session.flush()
 
-                session.add(WatchlistAsset(watchlist_id=watchlist.id, asset_id=existing.id, notes=notes))
-                await session.flush()
+                already_linked = (await session.execute(
+                    select(WatchlistAsset).where(
+                        WatchlistAsset.watchlist_id == watchlist.id,
+                        WatchlistAsset.asset_id == existing.id,
+                    )
+                )).scalar_one_or_none()
+
+                if not already_linked:
+                    session.add(WatchlistAsset(watchlist_id=watchlist.id, asset_id=existing.id, notes=notes))
+                    await session.flush()
+
                 logger.info("Seed: ticker ajouté", ticker=ticker, price=info["price"])
 
-            except Exception as e:
-                logger.warning("Seed: échec ticker", ticker=ticker, error=str(e))
+            await session.commit()
+            logger.info("Seed terminé", watchlist="Mon PEA")
 
-        await session.commit()
-        logger.info("Seed terminé", watchlist="Mon PEA")
+    except Exception as e:
+        logger.warning("Seed ignoré (race condition ou déjà effectué)", error=str(e))
