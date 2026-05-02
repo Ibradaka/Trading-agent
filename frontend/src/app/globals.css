@@ -26,11 +26,6 @@
     --radius: 0.5rem;
   }
 
-  /* Forcer le dark mode — light mode optionnel via toggle */
-  html {
-    @apply dark;
-  }
-
   * {
     @apply border-border;
   }
