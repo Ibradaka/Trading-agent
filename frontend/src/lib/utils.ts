@@ -40,3 +40,9 @@ export function formatPrice(price: number, currency = "EUR"): string {
 export function formatScore(score: number): string {
   return `${Math.round(score)}/100`;
 }
+
+export function formatAssetPrice(price: number, currency: string | null): string {
+  if (currency === "GBp") return `£${(price / 100).toFixed(2)}`;
+  const sym = currency === "GBP" ? "£" : currency === "EUR" ? "€" : currency === "USD" ? "$" : (currency ?? "");
+  return `${sym}${price.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}

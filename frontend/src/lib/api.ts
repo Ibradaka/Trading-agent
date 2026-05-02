@@ -102,10 +102,26 @@ export interface AssetQuote {
   current_price: number | null;
   previous_close: number | null;
   change_pct: number | null;
+  week_change_pct: number | null;
+  month_change_pct: number | null;
   currency: string | null;
   exchange: string | null;
   market_state: string | null;
+  open: number | null;
+  day_high: number | null;
+  day_low: number | null;
+  volume: number | null;
+  week52_high: number | null;
+  week52_low: number | null;
   history: OHLCBar[];
+}
+
+export interface NewsItem {
+  title: string;
+  title_original: string;
+  link: string;
+  publisher: string;
+  published_at: number | null;
 }
 
 export interface WatchlistSignalEntry {
@@ -156,12 +172,15 @@ export const api = {
       request<WatchlistAssetEntry[]>(`/api/assets/search?q=${encodeURIComponent(q)}`),
     quote: (ticker: string) =>
       request<AssetQuote>(`/api/assets/${encodeURIComponent(ticker)}/quote`),
+    news: (ticker: string) =>
+      request<NewsItem[]>(`/api/assets/${encodeURIComponent(ticker)}/news`),
   },
 
   signals: {
     latest: (ticker: string) => request<Signal | { signal: null }>(`/api/signals/${ticker}/latest`),
     history: (ticker: string, limit = 20) =>
       request<Signal[]>(`/api/signals/${ticker}/history?limit=${limit}`),
+    active: () => request<Signal[]>("/api/signals/active"),
   },
 
   health: () => request<{ status: string; version: string }>("/health"),

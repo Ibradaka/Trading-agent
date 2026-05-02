@@ -5,7 +5,7 @@ import { api, type WatchlistSignalEntry, type AssetQuote } from "@/lib/api";
 import { useState } from "react";
 import { Plus, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import Link from "next/link";
-import { cn, signalLabel, scoreToColor, formatScore } from "@/lib/utils";
+import { cn, signalLabel, scoreToColor, formatScore, formatAssetPrice } from "@/lib/utils";
 import { useSSE } from "@/lib/sse";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -77,29 +77,43 @@ function PriceCell({ ticker }: { ticker: string }) {
   const positive = (quote.change_pct ?? 0) >= 0;
   const sparkData = quote.history.map((b) => ({ v: b.close }));
 
-  const formatPrice = (p: number, currency: string | null) => {
-    const sym = currency === "GBP" ? "£" : currency === "EUR" ? "€" : currency === "USD" ? "$" : (currency ?? "");
-    // GBp (pence) → divide by 100
-    if (currency === "GBp") return `£${(p / 100).toFixed(2)}`;
-    return `${sym}${p.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const changeBadge = (val: number | null, label: string, muted = false) => {
+    if (val === null) return null;
+    const pos = val >= 0;
+    return (
+      <span
+        className={cn(
+          "font-mono",
+          muted
+            ? pos ? "text-emerald-400/60" : "text-red-400/60"
+            : pos ? "text-emerald-400" : "text-red-400"
+        )}
+      >
+        {label}:{pos ? "+" : ""}{val.toFixed(1)}%
+      </span>
+    );
   };
 
   return (
     <div className="flex items-center gap-3">
-      {/* Prix + variation */}
-      <div className="text-right min-w-[90px]">
+      {/* Prix + variations multi-timeframe */}
+      <div className="min-w-[110px]">
         <p className="text-sm font-mono font-semibold text-slate-100">
-          {formatPrice(quote.current_price, quote.currency)}
+          {formatAssetPrice(quote.current_price, quote.currency)}
         </p>
-        <div className={cn("flex items-center justify-end gap-0.5 text-xs font-medium", positive ? "text-emerald-400" : "text-red-400")}>
-          {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-          {quote.change_pct !== null ? `${positive ? "+" : ""}${quote.change_pct.toFixed(2)}%` : "—"}
+        <div className="flex items-center gap-1.5 text-xs mt-0.5 flex-wrap">
+          <span className={cn("flex items-center gap-0.5 font-medium font-mono", positive ? "text-emerald-400" : "text-red-400")}>
+            {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+            {quote.change_pct !== null ? `${positive ? "+" : ""}${quote.change_pct.toFixed(2)}%` : "—"}
+          </span>
+          {changeBadge(quote.week_change_pct, "1S", true)}
+          {changeBadge(quote.month_change_pct, "1M", true)}
         </div>
       </div>
 
-      {/* Sparkline 5j */}
+      {/* Sparkline 1 mois */}
       {sparkData.length > 1 && (
-        <div className="hidden sm:block">
+        <div className="hidden lg:block">
           <Sparkline data={sparkData} positive={positive} />
         </div>
       )}
@@ -212,7 +226,7 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
       <div className="flex items-center gap-3 px-4 py-2 text-xs text-slate-600 border-b border-slate-800 mb-1">
         <span className="w-28">Actif</span>
         <span className="w-20">Type</span>
-        <span className="flex-1">Prix / 5 jours</span>
+        <span className="flex-1">Prix · 1J / 1S / 1M</span>
         <span className="w-28 text-center">Signal</span>
         <span className="w-16 text-right">Score</span>
       </div>

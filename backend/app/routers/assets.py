@@ -8,7 +8,9 @@ import uuid
 
 from app.database import get_session
 from app.models.db import Asset
-from app.services.yfinance_session import yf_chart, yf_chart_full, yf_quote_summary
+from app.services.yfinance_session import yf_chart, yf_chart_full, yf_quote_summary, yf_news
+from app.services.redis_client import cache_get, cache_set
+from app.services.llm import translate_titles_to_french
 
 router = APIRouter()
 
@@ -144,17 +146,21 @@ async def validate_and_add_asset(
 
 
 def _fetch_quote(ticker: str) -> dict:
-    """Synchrone — appelé via asyncio.to_thread. Retourne prix courant + historique 5j."""
+    """Synchrone — appelé via asyncio.to_thread.
+    Retourne prix courant + OHLC du jour + 52S range + historique 1mo + variations multi-timeframe."""
     full = yf_chart_full(ticker)
+    summary = yf_quote_summary(ticker)
     meta = full.get("meta", {})
-    timestamps = full.get("timestamp") or []
-    quotes = (full.get("indicators", {}).get("quote") or [{}])[0]
+    price_data = summary.get("price", {})
 
-    closes = quotes.get("close") or []
-    opens = quotes.get("open") or []
-    highs = quotes.get("high") or []
-    lows = quotes.get("low") or []
-    volumes = quotes.get("volume") or []
+    timestamps = full.get("timestamp") or []
+    quotes_raw = (full.get("indicators", {}).get("quote") or [{}])[0]
+
+    closes = quotes_raw.get("close") or []
+    opens_arr = quotes_raw.get("open") or []
+    highs_arr = quotes_raw.get("high") or []
+    lows_arr = quotes_raw.get("low") or []
+    volumes_arr = quotes_raw.get("volume") or []
 
     history = []
     for i, ts in enumerate(timestamps):
@@ -163,27 +169,50 @@ def _fetch_quote(ticker: str) -> dict:
             continue
         history.append({
             "date": ts,
-            "open": opens[i] if i < len(opens) else None,
-            "high": highs[i] if i < len(highs) else None,
-            "low": lows[i] if i < len(lows) else None,
+            "open": opens_arr[i] if i < len(opens_arr) else None,
+            "high": highs_arr[i] if i < len(highs_arr) else None,
+            "low": lows_arr[i] if i < len(lows_arr) else None,
             "close": c,
-            "volume": volumes[i] if i < len(volumes) else None,
+            "volume": volumes_arr[i] if i < len(volumes_arr) else None,
         })
 
     current_price = meta.get("regularMarketPrice")
     previous_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+
     change_pct = None
     if current_price and previous_close:
         change_pct = round((current_price - previous_close) / previous_close * 100, 2)
+
+    week_change_pct = None
+    month_change_pct = None
+    if history and current_price:
+        if len(history) >= 5 and history[-5]["close"]:
+            week_change_pct = round((current_price - history[-5]["close"]) / history[-5]["close"] * 100, 2)
+        if history[0]["close"]:
+            month_change_pct = round((current_price - history[0]["close"]) / history[0]["close"] * 100, 2)
+
+    def _raw(field: str) -> float | None:
+        val = price_data.get(field)
+        if isinstance(val, dict):
+            return val.get("raw")
+        return val
 
     return {
         "ticker": ticker,
         "current_price": current_price,
         "previous_close": previous_close,
         "change_pct": change_pct,
+        "week_change_pct": week_change_pct,
+        "month_change_pct": month_change_pct,
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName"),
         "market_state": meta.get("marketState"),
+        "open": _raw("regularMarketOpen"),
+        "day_high": _raw("regularMarketDayHigh"),
+        "day_low": _raw("regularMarketDayLow"),
+        "volume": _raw("regularMarketVolume"),
+        "week52_high": _raw("fiftyTwoWeekHigh"),
+        "week52_low": _raw("fiftyTwoWeekLow"),
         "history": history,
     }
 
@@ -198,6 +227,37 @@ async def get_asset_quote(ticker: str):
         return data
     except Exception as e:
         return {"error": str(e), "ticker": ticker_upper}
+
+
+@router.get("/{ticker}/news")
+async def get_asset_news(ticker: str):
+    ticker_upper = ticker.upper().strip()
+    cache_key = f"news:{ticker_upper}"
+
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    raw_news = await asyncio.to_thread(yf_news, ticker_upper)
+    if not raw_news:
+        return []
+
+    titles = [item.get("title", "") for item in raw_news]
+    translated = await translate_titles_to_french(titles)
+
+    result = [
+        {
+            "title": translated[i] if i < len(translated) else titles[i],
+            "title_original": titles[i],
+            "link": item.get("link", ""),
+            "publisher": item.get("publisher", ""),
+            "published_at": item.get("providerPublishTime"),
+        }
+        for i, item in enumerate(raw_news)
+    ]
+
+    await cache_set(cache_key, result, 1800)
+    return result
 
 
 @router.get("/search")

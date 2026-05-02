@@ -34,6 +34,23 @@ def _format_signal(signal: Signal, asset: Asset) -> dict:
     }
 
 
+@router.get("/active")
+async def get_active_signals(db: AsyncSession = Depends(get_session)):
+    """Retourne tous les signaux BUY/SELL actifs triés par score décroissant."""
+    result = await db.execute(
+        select(Signal, Asset)
+        .join(Asset, Asset.id == Signal.asset_id)
+        .where(
+            Signal.is_active == True,
+            Signal.signal_type.in_(["BUY", "SELL"]),
+        )
+        .order_by(desc(Signal.composite_score))
+        .limit(20)
+    )
+    rows = result.all()
+    return [_format_signal(signal, asset) for signal, asset in rows]
+
+
 @router.get("/{ticker}/latest")
 async def get_latest_signal(ticker: str, db: AsyncSession = Depends(get_session)):
     """Retourne le dernier signal actif pour un ticker."""

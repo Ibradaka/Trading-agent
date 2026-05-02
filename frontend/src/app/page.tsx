@@ -1,13 +1,19 @@
 import { WatchlistPanel } from "@/components/watchlist/watchlist-panel";
+import { ActiveSignalsPanel } from "@/components/signals/active-signals-panel";
+import { SummaryBar } from "@/components/layout/summary-bar";
 
 export default function HomePage() {
   return (
-    <div className="h-full">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-slate-100">Watchlists</h1>
-        <p className="text-sm text-slate-500 mt-1">Suivi des signaux en temps réel</p>
+    <div className="h-full space-y-4">
+      <SummaryBar />
+      <div className="flex gap-6 items-start">
+        <div className="flex-1 min-w-0">
+          <WatchlistPanel />
+        </div>
+        <div className="w-72 flex-shrink-0">
+          <ActiveSignalsPanel />
+        </div>
       </div>
-      <WatchlistPanel />
     </div>
   );
 }

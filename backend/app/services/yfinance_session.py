@@ -6,10 +6,14 @@ from curl_cffi.requests import Session
 
 _session: Session | None = None
 
-_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=5d"
+_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1mo"
 _SUMMARY_URL = (
     "https://query2.finance.yahoo.com/v11/finance/quoteSummary/{ticker}"
     "?modules=price,summaryProfile,assetProfile"
+)
+_NEWS_URL = (
+    "https://query1.finance.yahoo.com/v1/finance/search"
+    "?q={ticker}&newsCount=5&enableFuzzyQuery=false&enableEnhancedTrivialQuery=true"
 )
 
 
@@ -48,3 +52,12 @@ def yf_quote_summary(ticker: str) -> dict:
         return results[0] if results else {}
     except Exception:
         return {}
+
+
+def yf_news(ticker: str) -> list[dict]:
+    """Retourne les 5 dernières news Yahoo Finance pour un ticker."""
+    try:
+        r = get_yf_session().get(_NEWS_URL.format(ticker=ticker), timeout=15)
+        return r.json().get("news", [])[:5]
+    except Exception:
+        return []
