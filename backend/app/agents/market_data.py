@@ -6,7 +6,7 @@ import structlog
 import pandas as pd
 import yfinance as yf
 from sqlalchemy import text
-from app.services.yfinance_session import get_yf_session
+from app.services.yfinance_session import get_yf_session, yf_chart
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal

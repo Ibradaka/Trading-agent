@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import yfinance as yf
 
 from app.models.db import Asset, Watchlist, WatchlistAsset
-from app.services.yfinance_session import get_yf_session
+from app.services.yfinance_session import get_yf_session, yf_chart, yf_quote_summary
 
 logger = structlog.get_logger()
 
@@ -84,17 +84,22 @@ def _parse_yf_info(ticker: str, info: dict) -> dict:
 
 
 def _yf_fetch(ticker: str) -> dict:
-    """Synchrone — appelé via asyncio.to_thread."""
-    yfobj = yf.Ticker(ticker, session=get_yf_session())
-    info = yfobj.info or {}
-    if not info.get("regularMarketPrice") and not info.get("currentPrice"):
-        try:
-            price = yfobj.fast_info["lastPrice"]
-            if price:
-                info["regularMarketPrice"] = price
-        except Exception:
-            pass
-    return info
+    """Synchrone — appelé via asyncio.to_thread. Utilise curl_cffi directement."""
+    meta = yf_chart(ticker)
+    summary = yf_quote_summary(ticker)
+    price = summary.get("price", {})
+    profile = summary.get("summaryProfile", {}) or summary.get("assetProfile", {})
+    return {
+        "regularMarketPrice": (price.get("regularMarketPrice") or {}).get("raw") or meta.get("regularMarketPrice"),
+        "currency": price.get("currency") or meta.get("currency"),
+        "exchange": price.get("exchange") or meta.get("exchangeName"),
+        "shortName": price.get("shortName") or meta.get("symbol"),
+        "longName": price.get("longName"),
+        "quoteType": price.get("quoteType"),
+        "sector": profile.get("sector"),
+        "country": profile.get("country"),
+        "marketCap": (price.get("marketCap") or {}).get("raw"),
+    }
 
 
 async def validate_ticker(ticker: str) -> dict:
