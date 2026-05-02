@@ -12,6 +12,7 @@ CMD ["npm", "run", "dev"]
 FROM base AS builder
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_API_URL=http://backend:8899
 RUN npm run build
 
 # ---- Production stage ----
