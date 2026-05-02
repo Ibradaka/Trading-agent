@@ -30,6 +30,16 @@ def yf_chart(ticker: str) -> dict:
         return {}
 
 
+def yf_chart_full(ticker: str) -> dict:
+    """Retourne le résultat complet du chart Yahoo Finance (meta + timestamps + OHLCV)."""
+    try:
+        r = get_yf_session().get(_CHART_URL.format(ticker=ticker), timeout=15)
+        results = r.json().get("chart", {}).get("result") or []
+        return results[0] if results else {}
+    except Exception:
+        return {}
+
+
 def yf_quote_summary(ticker: str) -> dict:
     """Retourne {price: {…}, summaryProfile: {…}} depuis quoteSummary."""
     try:

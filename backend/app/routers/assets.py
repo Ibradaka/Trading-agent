@@ -8,7 +8,7 @@ import uuid
 
 from app.database import get_session
 from app.models.db import Asset
-from app.services.yfinance_session import yf_chart, yf_quote_summary
+from app.services.yfinance_session import yf_chart, yf_chart_full, yf_quote_summary
 
 router = APIRouter()
 
@@ -141,6 +141,63 @@ async def validate_and_add_asset(
     db.add(asset)
     await db.flush()
     return {"ticker": ticker_upper, "created": True, "asset_id": str(asset.id)}
+
+
+def _fetch_quote(ticker: str) -> dict:
+    """Synchrone — appelé via asyncio.to_thread. Retourne prix courant + historique 5j."""
+    full = yf_chart_full(ticker)
+    meta = full.get("meta", {})
+    timestamps = full.get("timestamp") or []
+    quotes = (full.get("indicators", {}).get("quote") or [{}])[0]
+
+    closes = quotes.get("close") or []
+    opens = quotes.get("open") or []
+    highs = quotes.get("high") or []
+    lows = quotes.get("low") or []
+    volumes = quotes.get("volume") or []
+
+    history = []
+    for i, ts in enumerate(timestamps):
+        c = closes[i] if i < len(closes) else None
+        if c is None:
+            continue
+        history.append({
+            "date": ts,
+            "open": opens[i] if i < len(opens) else None,
+            "high": highs[i] if i < len(highs) else None,
+            "low": lows[i] if i < len(lows) else None,
+            "close": c,
+            "volume": volumes[i] if i < len(volumes) else None,
+        })
+
+    current_price = meta.get("regularMarketPrice")
+    previous_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+    change_pct = None
+    if current_price and previous_close:
+        change_pct = round((current_price - previous_close) / previous_close * 100, 2)
+
+    return {
+        "ticker": ticker,
+        "current_price": current_price,
+        "previous_close": previous_close,
+        "change_pct": change_pct,
+        "currency": meta.get("currency"),
+        "exchange": meta.get("exchangeName"),
+        "market_state": meta.get("marketState"),
+        "history": history,
+    }
+
+
+@router.get("/{ticker}/quote")
+async def get_asset_quote(ticker: str):
+    ticker_upper = ticker.upper().strip()
+    try:
+        data = await asyncio.to_thread(_fetch_quote, ticker_upper)
+        if not data.get("current_price"):
+            return {"error": "No data", "ticker": ticker_upper}
+        return data
+    except Exception as e:
+        return {"error": str(e), "ticker": ticker_upper}
 
 
 @router.get("/search")

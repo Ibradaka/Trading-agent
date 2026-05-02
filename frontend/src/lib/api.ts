@@ -88,6 +88,26 @@ export interface Signal {
   is_active: boolean;
 }
 
+export interface OHLCBar {
+  date: number;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number;
+  volume: number | null;
+}
+
+export interface AssetQuote {
+  ticker: string;
+  current_price: number | null;
+  previous_close: number | null;
+  change_pct: number | null;
+  currency: string | null;
+  exchange: string | null;
+  market_state: string | null;
+  history: OHLCBar[];
+}
+
 export interface WatchlistSignalEntry {
   ticker: string;
   name: string;
@@ -134,6 +154,8 @@ export const api = {
       }),
     search: (q: string) =>
       request<WatchlistAssetEntry[]>(`/api/assets/search?q=${encodeURIComponent(q)}`),
+    quote: (ticker: string) =>
+      request<AssetQuote>(`/api/assets/${encodeURIComponent(ticker)}/quote`),
   },
 
   signals: {
