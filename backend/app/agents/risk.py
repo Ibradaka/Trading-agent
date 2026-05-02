@@ -241,12 +241,12 @@ async def _write_signal(
     confidence: float,
     patterns: list[dict],
     indicators: dict,
+    llm_result: dict | None = None,
 ) -> str:
     """Insère un signal et désactive les précédents."""
     signal_id = str(uuid4())
     now = datetime.now(timezone.utc)
 
-    # Désactiver les signaux actifs précédents
     await session.execute(
         text("""
             UPDATE signals SET is_active = FALSE
@@ -255,15 +255,35 @@ async def _write_signal(
         {"asset_id": asset_id},
     )
 
-    risks = [f"• {p['pattern_name']}" for p in patterns if p["direction"] == "bearish"]
-    bullish_patterns = [p["pattern_name"] for p in patterns if p["direction"] == "bullish"]
+    bullish_patterns = [p["pattern_name"] for p in patterns if p.get("direction") == "bullish"]
+    bearish_patterns = [p["pattern_name"] for p in patterns if p.get("direction") == "bearish"]
 
-    reasoning = (
+    # Fallback deterministic reasoning
+    default_reasoning = (
         f"Score composite {breakdown.composite:.0f}/100 — "
         f"Technique {breakdown.technical:.0f} / Patterns {breakdown.patterns:.0f} / "
         f"Momentum {breakdown.momentum:.0f} / Macro {breakdown.macro:.0f} / Sentiment {breakdown.sentiment:.0f}. "
         f"Patterns haussiers : {', '.join(bullish_patterns) or 'aucun'}."
     )
+    ema20 = indicators.get("ema20")
+    default_invalidation = f"Clôture sous EMA20 ({ema20:.2f})" if ema20 else None
+
+    if llm_result:
+        reasoning = llm_result.get("reasoning") or default_reasoning
+        invalidation = llm_result.get("invalidation_conditions") or default_invalidation
+        horizon = llm_result.get("horizon") or "3-10 jours (swing trading)"
+        risks_raw = llm_result.get("risks") or [f"• {p}" for p in bearish_patterns]
+        llm_raw = llm_result.get("llm_raw_output")
+    else:
+        reasoning = default_reasoning
+        invalidation = default_invalidation
+        horizon = "3-10 jours (swing trading)"
+        risks_raw = [f"• {p}" for p in bearish_patterns]
+        llm_raw = None
+
+    import json
+    risks_json = json.dumps(risks_raw if risks_raw else [])
+    llm_json = json.dumps(llm_raw) if llm_raw else "null"
 
     await session.execute(
         text("""
@@ -299,10 +319,10 @@ async def _write_signal(
             "momentum_score": breakdown.momentum,
             "confidence": confidence,
             "reasoning": reasoning,
-            "risks": str(risks).replace("'", '"') if risks else "[]",
-            "invalidation_conditions": f"Clôture sous EMA20 ({indicators.get('ema20', 'N/A'):.2f})" if indicators.get("ema20") else None,
-            "horizon": "3-10 jours (swing trading)",
-            "llm_raw_output": "null",
+            "risks": risks_json,
+            "invalidation_conditions": invalidation,
+            "horizon": horizon,
+            "llm_raw_output": llm_json,
         },
     )
     return signal_id
@@ -363,13 +383,18 @@ async def filter_and_score_all() -> None:
             mom_score = compute_momentum_score(indicators)
             pat_score = compute_pattern_score(patterns)
 
-            # Macro et sentiment à 50 tant que spec-003 n'est pas implémentée
+            # spec-003: real sentiment + macro scores (from Redis cache, 50 fallback)
+            from app.agents.sentiment import get_sentiment_score
+            from app.agents.macro import get_macro_score
+            sentiment_score, sentiment_narrative, _ = await get_sentiment_score(ticker)
+            macro_score, macro_narrative = await get_macro_score()
+
             breakdown = compute_composite_score(
                 technical=tech_score,
                 patterns=pat_score,
                 momentum=mom_score,
-                macro=50.0,
-                sentiment=50.0,
+                macro=macro_score,
+                sentiment=sentiment_score,
             )
 
             assessment = await assess_risk(
@@ -391,10 +416,23 @@ async def filter_and_score_all() -> None:
                 )
                 return
 
+            # spec-003: LLM synthesis (enriches reasoning, falls back gracefully)
+            from app.services.llm import synthesize_signal
+            llm_result = await synthesize_signal(
+                ticker=ticker,
+                asset_name=ticker,
+                breakdown=breakdown,
+                indicators=indicators,
+                patterns=patterns,
+                sentiment_narrative=sentiment_narrative,
+                macro_narrative=macro_narrative,
+            )
+
             async with AsyncSessionLocal() as session:
                 signal_id = await _write_signal(
                     session, asset_id, breakdown,
                     assessment.confidence, patterns, indicators,
+                    llm_result=llm_result,
                 )
                 await session.commit()
 

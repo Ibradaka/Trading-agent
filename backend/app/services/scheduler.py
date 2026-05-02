@@ -2,7 +2,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 import structlog
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 import pytz
 
 from app.config import settings
@@ -40,20 +40,19 @@ async def _run_market_data_pipeline() -> None:
         await compute_all_indicators()
         await detect_all_patterns()
         await filter_and_score_all()
-        # synthesize_all() sera ajouté en spec-003 (LLM enrichissement)
+        # spec-003: LLM synthesis est intégré dans filter_and_score_all()
         logger.info("Market data pipeline completed")
     except Exception:
         logger.exception("Market data pipeline failed")
 
 
 async def _run_sentiment_update() -> None:
-    """Refresh sentiment RSS toutes les 15 min."""
+    """Refresh sentiment RSS toutes les 15 min (heures de marché)."""
     if not is_market_open():
         return
     try:
-        # from app.agents.sentiment import update_all_sentiments
-        # await update_all_sentiments()
-        pass
+        from app.agents.sentiment import update_all_sentiments
+        await update_all_sentiments()
     except Exception:
         logger.exception("Sentiment update failed")
 
@@ -61,9 +60,8 @@ async def _run_sentiment_update() -> None:
 async def _run_macro_update() -> None:
     """Refresh macro FRED toutes les 6h."""
     try:
-        # from app.agents.macro import update_macro_context
-        # await update_macro_context()
-        pass
+        from app.agents.macro import update_macro_context
+        await update_macro_context()
     except Exception:
         logger.exception("Macro update failed")
 
@@ -103,6 +101,7 @@ async def start_scheduler() -> None:
         id="macro_update",
         replace_existing=True,
         max_instances=1,
+        next_run_time=datetime.now(timezone.utc),  # Run immediately at startup
     )
 
     _scheduler.add_job(
