@@ -244,7 +244,7 @@ function PositionRow({
         <td className="px-4 py-3">
           <select
             value={editData.account_type}
-            onChange={(e) => setEditData({ ...editData, account_type: e.target.value })}
+            onChange={(e) => setEditData({ ...editData, account_type: e.target.value as Position["account_type"] })}
             className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
           >
             {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
