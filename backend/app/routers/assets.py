@@ -4,27 +4,29 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
-import yfinance as yf
 import uuid
 
 from app.database import get_session
 from app.models.db import Asset
+from app.services.yfinance_session import yf_chart, yf_quote_summary
 
 router = APIRouter()
 
 PEA_ELIGIBLE_EXCHANGES = {
-    "ENX", "PAR", "EPA",          # Euronext Paris
-    "AMS", "EAM",                  # Amsterdam
-    "BRU", "EBR",                  # Bruxelles
-    "LIS", "ELI",                  # Lisbonne
-    "XETRA", "GER", "EWE", "ETR", # Xetra (Allemagne)
-    "MIL", "BIT",                  # Milan
-    "MAD", "MCE",                  # Madrid
-    "STO", "HEL", "CPH", "OSL",   # Nordiques
+    "ENX", "PAR", "EPA",
+    "AMS", "EAM",
+    "BRU", "EBR",
+    "LIS", "ELI",
+    "XETRA", "GER", "EWE", "ETR",
+    "MIL", "BIT",
+    "MAD", "MCE",
+    "STO", "HEL", "CPH", "OSL",
 }
 
+PEA_ELIGIBLE_SUFFIXES = {".PA", ".AS", ".BR", ".LS", ".DE", ".MI", ".MC", ".AM"}
 
-def _detect_asset_type(ticker: str, info: dict) -> str:
+
+def _detect_asset_type(ticker: str) -> str:
     if ticker.endswith("=F"):
         return "commodity"
     if ticker.startswith("^"):
@@ -36,12 +38,33 @@ def _detect_asset_type(ticker: str, info: dict) -> str:
     return "equity"
 
 
-def _check_pea_eligibility(ticker: str, info: dict) -> bool:
-    asset_type = _detect_asset_type(ticker, info)
-    if asset_type != "equity":
+def _check_pea_eligibility(ticker: str, exchange: str) -> bool:
+    if _detect_asset_type(ticker) != "equity":
         return False
-    exchange = info.get("exchange", "").upper()
-    return exchange in PEA_ELIGIBLE_EXCHANGES
+    for suffix in PEA_ELIGIBLE_SUFFIXES:
+        if ticker.endswith(suffix):
+            return True
+    return (exchange or "").upper() in PEA_ELIGIBLE_EXCHANGES
+
+
+def _fetch_ticker_info(ticker: str) -> dict:
+    """Synchrone — appelé via asyncio.to_thread."""
+    meta = yf_chart(ticker)
+    summary = yf_quote_summary(ticker)
+    price_data = summary.get("price", {})
+    profile = summary.get("summaryProfile", {}) or summary.get("assetProfile", {})
+    return {
+        "regularMarketPrice": (price_data.get("regularMarketPrice") or {}).get("raw") or meta.get("regularMarketPrice"),
+        "currency": price_data.get("currency") or meta.get("currency"),
+        "exchange": price_data.get("exchange") or meta.get("exchangeName"),
+        "shortName": price_data.get("shortName") or meta.get("symbol"),
+        "longName": price_data.get("longName"),
+        "quoteType": price_data.get("quoteType"),
+        "sector": profile.get("sector"),
+        "country": profile.get("country"),
+        "marketCap": (price_data.get("marketCap") or {}).get("raw"),
+        "longBusinessSummary": profile.get("longBusinessSummary", ""),
+    }
 
 
 class TickerValidation(BaseModel):
@@ -60,29 +83,28 @@ class TickerValidation(BaseModel):
 
 @router.get("/validate")
 async def validate_ticker(ticker: str = Query(min_length=1, max_length=20)) -> TickerValidation:
-    """Valide un ticker yfinance et retourne ses métadonnées."""
     ticker_upper = ticker.upper().strip()
     try:
-        info = await asyncio.to_thread(lambda: yf.Ticker(ticker_upper).info)
-        price = info.get("regularMarketPrice") or info.get("currentPrice")
+        info = await asyncio.to_thread(_fetch_ticker_info, ticker_upper)
+        price = info.get("regularMarketPrice")
         if not price:
-            return TickerValidation(valid=False, error="Ticker not found or no market data")
+            return TickerValidation(valid=False, ticker=ticker_upper, error="Ticker not found or no market data")
 
-        asset_type = _detect_asset_type(ticker_upper, info)
+        exchange = info.get("exchange", "")
         return TickerValidation(
             valid=True,
             ticker=ticker_upper,
             name=info.get("longName") or info.get("shortName") or ticker_upper,
-            asset_type=asset_type,
-            exchange=info.get("exchange"),
+            asset_type=_detect_asset_type(ticker_upper),
+            exchange=exchange,
             currency=info.get("currency"),
             sector=info.get("sector"),
             country=info.get("country"),
-            is_pea_eligible=_check_pea_eligibility(ticker_upper, info),
+            is_pea_eligible=_check_pea_eligibility(ticker_upper, exchange),
             current_price=price,
         )
     except Exception as e:
-        return TickerValidation(valid=False, error=str(e))
+        return TickerValidation(valid=False, ticker=ticker_upper, error=str(e))
 
 
 @router.post("/validate/add")
@@ -90,7 +112,6 @@ async def validate_and_add_asset(
     ticker: str = Query(min_length=1, max_length=20),
     db: AsyncSession = Depends(get_session),
 ):
-    """Valide un ticker et l'ajoute à la table assets s'il n'existe pas."""
     ticker_upper = ticker.upper().strip()
 
     existing = await db.execute(select(Asset).where(Asset.ticker == ticker_upper))
@@ -101,7 +122,7 @@ async def validate_and_add_asset(
     if not validation.valid:
         return {"ticker": ticker_upper, "created": False, "error": validation.error}
 
-    info = await asyncio.to_thread(lambda: yf.Ticker(ticker_upper).info)
+    info = await asyncio.to_thread(_fetch_ticker_info, ticker_upper)
     asset = Asset(
         id=uuid.uuid4(),
         ticker=ticker_upper,
@@ -113,9 +134,8 @@ async def validate_and_add_asset(
         country=validation.country,
         is_pea_eligible=validation.is_pea_eligible,
         metadata_={
-            "longBusinessSummary": info.get("longBusinessSummary", "")[:500],
+            "longBusinessSummary": (info.get("longBusinessSummary") or "")[:500],
             "marketCap": info.get("marketCap"),
-            "employees": info.get("fullTimeEmployees"),
         },
     )
     db.add(asset)
@@ -128,12 +148,9 @@ async def search_assets(
     q: str = Query(min_length=1, max_length=50),
     db: AsyncSession = Depends(get_session),
 ):
-    """Recherche dans les actifs déjà en base."""
     result = await db.execute(
         select(Asset)
-        .where(
-            Asset.ticker.ilike(f"%{q}%") | Asset.name.ilike(f"%{q}%")
-        )
+        .where(Asset.ticker.ilike(f"%{q}%") | Asset.name.ilike(f"%{q}%"))
         .limit(10)
     )
     assets = result.scalars().all()
