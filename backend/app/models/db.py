@@ -1,9 +1,12 @@
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean, Text, DateTime,
     ForeignKey, DECIMAL, ARRAY, UniqueConstraint, Index,
-    func, text
+    func, text, TIMESTAMP, Time
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMPTZ, TIME
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+TIMESTAMPTZ = TIMESTAMP(timezone=True)
+TIME = Time
 from sqlalchemy.orm import relationship
 import uuid
 
