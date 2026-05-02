@@ -6,6 +6,7 @@ import structlog
 import pandas as pd
 import yfinance as yf
 from sqlalchemy import text
+from app.services.yfinance_session import get_yf_session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -23,7 +24,7 @@ TIMEFRAME_PARAMS: dict[str, dict] = {
 
 def _yf_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
     """Synchrone — appeler via asyncio.to_thread."""
-    yfobj = yf.Ticker(ticker)
+    yfobj = yf.Ticker(ticker, session=get_yf_session())
     df = yfobj.history(period=period, interval=interval, auto_adjust=True)
     if df.empty:
         return df

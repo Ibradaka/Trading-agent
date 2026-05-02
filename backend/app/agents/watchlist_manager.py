@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import yfinance as yf
 
 from app.models.db import Asset, Watchlist, WatchlistAsset
+from app.services.yfinance_session import get_yf_session
 
 logger = structlog.get_logger()
 
@@ -84,7 +85,7 @@ def _parse_yf_info(ticker: str, info: dict) -> dict:
 
 def _yf_fetch(ticker: str) -> dict:
     """Synchrone — appelé via asyncio.to_thread."""
-    yfobj = yf.Ticker(ticker)
+    yfobj = yf.Ticker(ticker, session=get_yf_session())
     info = yfobj.info or {}
     if not info.get("regularMarketPrice") and not info.get("currentPrice"):
         try:
