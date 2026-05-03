@@ -88,7 +88,21 @@ def _simulate_signals(
         tech_score = compute_technical_score(indicators)
         mom_score = compute_momentum_score(indicators)
 
-        # Sentiment et macro : neutre (pas de replay historique possible)
+        # Mode backtest : pas de replay sentiment/macro → score technique seul
+        # tech_composite = (0.35*tech + 0.20*patterns + 0.20*momentum) / 0.75
+        tech_composite = round(
+            (0.35 * tech_score + 0.20 * 50.0 + 0.20 * mom_score) / 0.75, 1
+        )
+        if tech_composite > 65:
+            signal_type = "BUY"
+        elif tech_composite < 45:
+            signal_type = "SELL"
+        else:
+            continue
+
+        if tech_composite < min_fusion_score:
+            continue
+
         breakdown = compute_composite_score(
             technical=tech_score,
             patterns=50.0,
@@ -97,11 +111,8 @@ def _simulate_signals(
             sentiment=50.0,
         )
         fusion = compute_fusion_score(breakdown)
-
-        if fusion["signal_type"] == "HOLD":
-            continue
-        if fusion["score"] < min_fusion_score:
-            continue
+        fusion["signal_type"] = signal_type
+        fusion["score"] = tech_composite
 
         conf = compute_confidence(
             tech_composite=fusion["technical_composite"],
