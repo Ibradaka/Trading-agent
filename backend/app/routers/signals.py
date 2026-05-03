@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, text
 from uuid import UUID
 
 from app.database import get_session
@@ -32,6 +32,16 @@ def _format_signal(signal: Signal, asset: Asset) -> dict:
         "timestamp": signal.timestamp.isoformat() if signal.timestamp else None,
         "is_active": signal.is_active,
     }
+
+
+@router.get("/recent")
+async def get_recent_signals(
+    limit: int = Query(default=50, le=200),
+    db: AsyncSession = Depends(get_session),
+):
+    """Signaux récents BUY/SELL toutes watchlists, avec outcome si disponible."""
+    from app.services.outcome_tracker import get_recent_signals_with_outcomes
+    return await get_recent_signals_with_outcomes(limit=limit)
 
 
 @router.get("/active")
@@ -92,6 +102,30 @@ async def get_signal_history(
     )
     signals = signals_result.scalars().all()
     return [_format_signal(s, asset) for s in signals]
+
+
+@router.get("/{signal_id}/outcome")
+async def get_signal_outcome(signal_id: str, db: AsyncSession = Depends(get_session)):
+    """Retourne les outcomes disponibles pour un signal (J+5, J+10, J+20)."""
+    result = await db.execute(
+        text("""
+            SELECT days_elapsed, actual_return_pct, was_correct, outcome_checked_at
+            FROM signal_outcomes
+            WHERE signal_id = :sid
+            ORDER BY days_elapsed ASC
+        """),
+        {"sid": signal_id},
+    )
+    rows = result.fetchall()
+    return [
+        {
+            "days_elapsed": r.days_elapsed,
+            "return_pct": float(r.actual_return_pct) if r.actual_return_pct is not None else None,
+            "was_correct": r.was_correct,
+            "checked_at": r.outcome_checked_at.isoformat() if r.outcome_checked_at else None,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/watchlist/{watchlist_id}")

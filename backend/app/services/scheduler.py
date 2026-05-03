@@ -67,11 +67,10 @@ async def _run_macro_update() -> None:
 
 
 async def _run_outcome_tracking() -> None:
-    """Vérifie l'accuracy des signaux passés (quotidien)."""
+    """Vérifie l'accuracy des signaux à J+5, J+10, J+20 (quotidien)."""
     try:
-        # from app.services.outcome_tracker import check_all_outcomes
-        # await check_all_outcomes()
-        pass
+        from app.services.outcome_tracker import check_all_outcomes
+        await check_all_outcomes()
     except Exception:
         logger.exception("Outcome tracking failed")
 

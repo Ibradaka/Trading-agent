@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, History, Settings, TrendingUp, Activity, Wallet } from "lucide-react";
+import { LayoutDashboard, History, Settings, TrendingUp, Activity, Wallet, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/", label: "Watchlists", icon: LayoutDashboard },
   { href: "/portfolio", label: "Portefeuille", icon: Wallet },
   { href: "/history", label: "Historique", icon: History },
+  { href: "/backtest", label: "Backtesting", icon: FlaskConical },
   { href: "/settings", label: "Configuration", icon: Settings },
 ];
 

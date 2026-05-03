@@ -139,6 +139,75 @@ export interface Position {
   is_active: boolean;
 }
 
+export interface SignalOutcome {
+  days_elapsed: number;
+  return_pct: number | null;
+  was_correct: boolean | null;
+  checked_at: string | null;
+}
+
+export interface SignalWithOutcome extends Signal {
+  outcome: SignalOutcome | null;
+}
+
+export interface AccuracyStats {
+  total_signals_tracked: number;
+  message?: string;
+  global_accuracy_pct: number | null;
+  buy_accuracy_pct: number | null;
+  sell_accuracy_pct: number | null;
+  avg_return_all_pct: number | null;
+  avg_return_correct_pct: number | null;
+  avg_return_incorrect_pct: number | null;
+  calibration: {
+    high_confidence: { n: number; accuracy_pct: number | null };
+    medium_confidence: { n: number; accuracy_pct: number | null };
+  };
+}
+
+export interface BacktestMetrics {
+  n_trades: number;
+  win_rate_pct?: number;
+  avg_return_pct?: number;
+  sharpe_ratio?: number;
+  max_drawdown_pct?: number;
+  cumulative_return_pct?: number;
+  horizon_days: number;
+  calibration?: {
+    high_confidence_win_rate_pct: number | null;
+    medium_confidence_win_rate_pct: number | null;
+    n_high: number;
+    n_medium: number;
+  };
+}
+
+export interface BacktestResult {
+  ticker: string;
+  period: string;
+  total_signals: number;
+  buy_signals: number;
+  sell_signals: number;
+  error?: string;
+  metrics: BacktestMetrics;
+  benchmarks: {
+    buy_and_hold_pct: number;
+    momentum_avg_return_pct: number;
+    ma_crossover_avg_return_pct: number;
+  };
+  signals: Array<{
+    date: string;
+    signal_type: string;
+    score: number;
+    confidence: number;
+    confidence_label: string;
+    price: number;
+    return_5d: number | null;
+    return_10d: number | null;
+    return_20d: number | null;
+    correct_20d: boolean | null;
+  }>;
+}
+
 export interface WatchlistSignalEntry {
   ticker: string;
   name: string;
@@ -196,6 +265,16 @@ export const api = {
     history: (ticker: string, limit = 20) =>
       request<Signal[]>(`/api/signals/${ticker}/history?limit=${limit}`),
     active: () => request<Signal[]>("/api/signals/active"),
+    recent: (limit = 50) => request<SignalWithOutcome[]>(`/api/signals/recent?limit=${limit}`),
+    outcome: (signalId: string) => request<SignalOutcome[]>(`/api/signals/${signalId}/outcome`),
+  },
+
+  backtest: {
+    stats: () => request<AccuracyStats>("/api/backtest/stats"),
+    run: (ticker: string, period = "5y", horizonDays = 20) =>
+      request<BacktestResult>(`/api/backtest/${encodeURIComponent(ticker)}?period=${period}&horizon_days=${horizonDays}`),
+    tickerAccuracy: (ticker: string) =>
+      request<{ ticker: string; total_tracked: number; accuracy_pct?: number; avg_return_pct?: number }>(`/api/backtest/${encodeURIComponent(ticker)}/accuracy`),
   },
 
   portfolio: {
