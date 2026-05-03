@@ -30,6 +30,7 @@ _QUIET_START = 22  # 22h00
 _QUIET_END = 7     # 07h00
 
 _listener_task: asyncio.Task | None = None
+_polling_task: asyncio.Task | None = None
 
 
 # ──────────────────────────────────────────────
@@ -407,13 +408,8 @@ async def _signal_listener() -> None:
     await pubsub.psubscribe("signal:updated:*")
     logger.info("Telegram signal listener started")
 
-    poll_counter = 0
-
     async for raw_msg in pubsub.listen():
         if raw_msg["type"] not in ("pmessage", "message"):
-            poll_counter += 1
-            if poll_counter % 10 == 0:
-                await _poll_commands()
             continue
 
         try:
@@ -448,11 +444,6 @@ async def _signal_listener() -> None:
         except Exception:
             logger.exception("Error processing signal alert", raw=raw_msg)
 
-        # Poll commandes toutes les ~10 messages
-        poll_counter += 1
-        if poll_counter % 10 == 0:
-            await _poll_commands()
-
 
 # ──────────────────────────────────────────────
 # Digest quotidien
@@ -479,23 +470,32 @@ async def send_daily_digest() -> None:
 # Lifecycle
 # ──────────────────────────────────────────────
 
+async def _command_polling_loop() -> None:
+    """Boucle indépendante — poll Telegram toutes les 3s pour les commandes."""
+    while True:
+        await _poll_commands()
+        await asyncio.sleep(3)
+
+
 async def start_telegram_bot() -> None:
-    global _listener_task
+    global _listener_task, _polling_task
     if not settings.telegram_bot_token:
         logger.info("Telegram token not set — bot disabled")
         return
     _listener_task = asyncio.create_task(_signal_listener())
+    _polling_task = asyncio.create_task(_command_polling_loop())
     logger.info("Telegram bot started")
 
 
 async def stop_telegram_bot() -> None:
-    global _listener_task
-    if _listener_task:
-        _listener_task.cancel()
-        try:
-            await _listener_task
-        except asyncio.CancelledError:
-            pass
+    global _listener_task, _polling_task
+    for task in [_listener_task, _polling_task]:
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     logger.info("Telegram bot stopped")
 
 
