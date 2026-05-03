@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createChart,
   type IChartApi,
@@ -8,6 +8,17 @@ import {
   type CandlestickData,
   ColorType,
 } from "lightweight-charts";
+import { cn } from "@/lib/utils";
+
+const RANGES = [
+  { label: "5J", value: "5d" },
+  { label: "1M", value: "1mo" },
+  { label: "3M", value: "3mo" },
+  { label: "6M", value: "6mo" },
+  { label: "1A", value: "1y" },
+] as const;
+
+type Range = typeof RANGES[number]["value"];
 
 interface Props {
   ticker: string;
@@ -18,6 +29,8 @@ export function TradingViewChart({ ticker, height = 400 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const [range, setRange] = useState<Range>("1mo");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -57,13 +70,12 @@ export function TradingViewChart({ ticker, height = 400 }: Props) {
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
 
-    // Resize observer
     const observer = new ResizeObserver(() => {
       if (containerRef.current) {
         chart.applyOptions({ width: containerRef.current.clientWidth });
       }
     });
-    if (containerRef.current) observer.observe(containerRef.current);
+    observer.observe(containerRef.current);
 
     return () => {
       observer.disconnect();
@@ -71,11 +83,11 @@ export function TradingViewChart({ ticker, height = 400 }: Props) {
     };
   }, [height]);
 
-  // Charge les données OHLC depuis l'API backend
   useEffect(() => {
     if (!candleSeriesRef.current) return;
+    setLoading(true);
 
-    fetch(`/api/assets/${ticker}/ohlc?timeframe=1d&limit=180`)
+    fetch(`/api/assets/${ticker}/chart?range=${range}`)
       .then((r) => r.json())
       .then((data: CandlestickData[]) => {
         if (Array.isArray(data) && data.length > 0) {
@@ -83,22 +95,39 @@ export function TradingViewChart({ ticker, height = 400 }: Props) {
           chartRef.current?.timeScale().fitContent();
         }
       })
-      .catch(() => {
-        // Données non disponibles encore — affichage vide
-      });
-  }, [ticker]);
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [ticker, range]);
 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-medium text-slate-300">{ticker} — Quotidien</span>
-        <div className="flex gap-2 text-xs text-slate-600">
-          <span className="text-blue-400">EMA 20</span>
-          <span className="text-orange-400">EMA 50</span>
-          <span className="text-red-400">EMA 200</span>
+        <span className="text-sm font-medium text-slate-300">{ticker}</span>
+        <div className="flex items-center gap-1">
+          {RANGES.map((r) => (
+            <button
+              key={r.value}
+              onClick={() => setRange(r.value)}
+              className={cn(
+                "px-2.5 py-1 text-xs rounded transition-colors",
+                range === r.value
+                  ? "bg-blue-600/20 text-blue-400 font-medium"
+                  : "text-slate-500 hover:text-slate-300"
+              )}
+            >
+              {r.label}
+            </button>
+          ))}
         </div>
       </div>
-      <div ref={containerRef} className="w-full rounded-lg overflow-hidden" style={{ height }} />
+      <div className="relative">
+        <div ref={containerRef} className="w-full rounded-lg overflow-hidden" style={{ height }} />
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50 rounded-lg">
+            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

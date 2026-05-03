@@ -8,7 +8,7 @@ import uuid
 
 from app.database import get_session
 from app.models.db import Asset
-from app.services.yfinance_session import yf_chart, yf_chart_full, yf_quote_summary, yf_news
+from app.services.yfinance_session import yf_chart, yf_chart_full, yf_quote_summary, yf_news, get_yf_session
 from app.services.redis_client import cache_get, cache_set
 from app.services.llm import translate_titles_to_french
 
@@ -258,6 +258,59 @@ async def get_asset_news(ticker: str):
 
     await cache_set(cache_key, result, 1800)
     return result
+
+
+_CHART_RANGES = {
+    "5d":  ("15m", "5d"),
+    "1mo": ("1d",  "1mo"),
+    "3mo": ("1d",  "3mo"),
+    "6mo": ("1d",  "6mo"),
+    "1y":  ("1d",  "1y"),
+}
+
+def _fetch_chart_ohlc(ticker: str, interval: str, range_: str) -> list[dict]:
+    """Fetch OHLC via curl_cffi — contourne le blocage datacenter."""
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        f"?interval={interval}&range={range_}"
+    )
+    r = get_yf_session().get(url, timeout=20)
+    result = (r.json().get("chart", {}).get("result") or [None])[0]
+    if not result:
+        return []
+    timestamps = result.get("timestamp") or []
+    q = (result.get("indicators", {}).get("quote") or [{}])[0]
+    adj = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
+    out = []
+    for i, ts in enumerate(timestamps):
+        c = adj[i] if adj and i < len(adj) else (q.get("close") or [None])[i] if i < len(q.get("close") or []) else None
+        o = (q.get("open") or [None])[i] if i < len(q.get("open") or []) else None
+        h = (q.get("high") or [None])[i] if i < len(q.get("high") or []) else None
+        l = (q.get("low") or [None])[i] if i < len(q.get("low") or []) else None
+        if c is None:
+            continue
+        out.append({"time": ts, "open": o, "high": h, "low": l, "close": c})
+    return out
+
+
+@router.get("/{ticker}/chart")
+async def get_asset_chart(ticker: str, range: str = Query(default="1mo")):
+    ticker_upper = ticker.upper().strip()
+    interval, range_ = _CHART_RANGES.get(range, ("1d", "1mo"))
+    cache_key = f"chart:{ticker_upper}:{range}"
+    ttl = 300 if range == "5d" else 1800
+
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        data = await asyncio.to_thread(_fetch_chart_ohlc, ticker_upper, interval, range_)
+        if data:
+            await cache_set(cache_key, data, ttl)
+        return data
+    except Exception as e:
+        return []
 
 
 @router.get("/search")
