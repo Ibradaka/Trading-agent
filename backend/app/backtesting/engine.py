@@ -7,12 +7,14 @@ import asyncio
 import structlog
 import numpy as np
 import pandas as pd
+from collections import defaultdict
 
 from app.services.yfinance_session import get_yf_session
 from app.scoring.technical import compute_technical_score, compute_momentum_score
 from app.scoring.composite import compute_composite_score, compute_fusion_score
 from app.agents.confidence import compute_confidence
 from app.agents.technical import compute_indicators
+from app.agents.patterns import detect_all_patterns_sync
 
 logger = structlog.get_logger()
 
@@ -125,14 +127,26 @@ def _simulate_signals(
         if conf["score"] / 100.0 < min_confidence:
             continue
 
+        # Patterns actifs sur la fenêtre courante
+        try:
+            active_patterns = detect_all_patterns_sync(window)
+        except Exception:
+            active_patterns = []
+
         signals.append({
             "date": df.index[i],
             "signal_type": fusion["signal_type"],
             "score": round(fusion["score"], 1),
+            "tech_score": round(tech_score, 1),
+            "mom_score": round(mom_score, 1),
             "confidence": round(conf["score"] / 100.0, 2),
             "confidence_label": conf["label"],
             "price": round(float(df.iloc[i]["close"]), 2),
             "idx": i,
+            "patterns": [
+                {"name": p["pattern_name"], "direction": p["direction"], "strength": p["strength"]}
+                for p in active_patterns
+            ],
         })
         last_signal_idx = i
 
@@ -242,6 +256,233 @@ def _compute_benchmarks(df: pd.DataFrame, start_idx: int, horizon: int = 20) -> 
     }
 
 
+def _winrate_for(sigs: list[dict], horizon: int) -> float | None:
+    c = [s[f"correct_{horizon}d"] for s in sigs if s.get(f"correct_{horizon}d") is not None]
+    return round(sum(c) / len(c) * 100, 1) if c else None
+
+
+def _avg_return(sigs: list[dict], horizon: int) -> float | None:
+    r = [s[f"return_{horizon}d"] for s in sigs if s.get(f"return_{horizon}d") is not None]
+    return round(float(np.mean(r)), 2) if r else None
+
+
+def _sharpe(sigs: list[dict], horizon: int) -> float | None:
+    r = [s[f"return_{horizon}d"] for s in sigs if s.get(f"return_{horizon}d") is not None]
+    if len(r) < 3:
+        return None
+    std = float(np.std(r))
+    if std == 0:
+        return None
+    return round((float(np.mean(r)) / std) * (252 / horizon) ** 0.5, 2)
+
+
+def _compute_diagnostics(signals: list[dict], df: pd.DataFrame, horizon: int = 20) -> dict:
+    """
+    Analyse de robustesse complète depuis les signaux backtestés.
+    Couvre 5.5.2 (qualité), 5.5.3 (score/confiance), 5.5.4 (type signal),
+    5.5.5 (patterns), 5.5.6 (sur-trading), 5.5.7 (label), 5.5.8 (recommandation).
+    """
+    valid = [s for s in signals if s.get(f"return_{horizon}d") is not None]
+    n = len(valid)
+    if n == 0:
+        return {"error": "Pas de signaux valides pour le diagnostic"}
+
+    total_days = len(df)
+
+    # ── 5.5.2 Qualité des signaux ───────────────────────────────────────────
+    buy_sigs  = [s for s in valid if s["signal_type"] == "BUY"]
+    sell_sigs = [s for s in valid if s["signal_type"] == "SELL"]
+
+    returns_all = [s[f"return_{horizon}d"] for s in valid]
+    signal_frequency = round(n / total_days * 252, 1)  # signaux / an annualisé
+
+    correct_all = [s[f"correct_{horizon}d"] for s in valid if s.get(f"correct_{horizon}d") is not None]
+    false_signal_rate = round((1 - sum(correct_all) / len(correct_all)) * 100, 1) if correct_all else None
+
+    # Stabilité temporelle : win rate sur première vs deuxième moitié
+    mid = n // 2
+    first_half  = valid[:mid]
+    second_half = valid[mid:]
+    wr_first  = _winrate_for(first_half, horizon)
+    wr_second = _winrate_for(second_half, horizon)
+    stability_delta = round(abs((wr_second or 0) - (wr_first or 0)), 1)
+
+    signal_quality = {
+        "total_signals": n,
+        "buy_count": len(buy_sigs),
+        "sell_count": len(sell_sigs),
+        "signal_frequency_per_year": signal_frequency,
+        "false_signal_rate_pct": false_signal_rate,
+        "return_std_pct": round(float(np.std(returns_all)), 2),
+        "return_dispersion_p25": round(float(np.percentile(returns_all, 25)), 2),
+        "return_dispersion_p75": round(float(np.percentile(returns_all, 75)), 2),
+        "stability_first_half_wr": wr_first,
+        "stability_second_half_wr": wr_second,
+        "stability_delta_pct": stability_delta,
+    }
+
+    # ── 5.5.3 Calibration par score et confiance ──────────────────────────
+    score_buckets = {
+        "50-60": [s for s in valid if 50 <= s["score"] < 60],
+        "60-70": [s for s in valid if 60 <= s["score"] < 70],
+        "70-80": [s for s in valid if 70 <= s["score"] < 80],
+        "80+":   [s for s in valid if s["score"] >= 80],
+    }
+    score_calibration = {
+        bucket: {
+            "n": len(sigs),
+            "win_rate_pct": _winrate_for(sigs, horizon),
+            "avg_return_pct": _avg_return(sigs, horizon),
+        }
+        for bucket, sigs in score_buckets.items()
+        if sigs
+    }
+
+    conf_buckets = {
+        "high":   [s for s in valid if s.get("confidence_label") == "high"],
+        "medium": [s for s in valid if s.get("confidence_label") == "medium"],
+        "low":    [s for s in valid if s.get("confidence_label") == "low"],
+    }
+    confidence_calibration = {
+        label: {
+            "n": len(sigs),
+            "win_rate_pct": _winrate_for(sigs, horizon),
+            "avg_return_pct": _avg_return(sigs, horizon),
+        }
+        for label, sigs in conf_buckets.items()
+        if sigs
+    }
+
+    # ── 5.5.4 Performance par type de signal ──────────────────────────────
+    by_signal_type = {}
+    for sig_type, sigs in [("BUY", buy_sigs), ("SELL", sell_sigs)]:
+        if not sigs:
+            continue
+        by_signal_type[sig_type] = {
+            "n": len(sigs),
+            "win_rate_pct": _winrate_for(sigs, horizon),
+            "avg_return_pct": _avg_return(sigs, horizon),
+            "sharpe": _sharpe(sigs, horizon),
+        }
+        rets = [s[f"return_{horizon}d"] for s in sigs if s.get(f"return_{horizon}d") is not None]
+        if len(rets) > 1:
+            cum = np.cumprod([1 + r / 100 for r in rets])
+            peak = np.maximum.accumulate(cum)
+            by_signal_type[sig_type]["max_drawdown_pct"] = round(float(np.min((cum - peak) / peak)) * 100, 2)
+
+    # ── 5.5.5 Performance par pattern de chandelier ───────────────────────
+    pattern_stats: dict[str, dict] = defaultdict(lambda: {"outcomes": [], "directions": []})
+    for s in valid:
+        for p in s.get("patterns", []):
+            key = p["name"]
+            ret = s.get(f"return_{horizon}d")
+            correct = s.get(f"correct_{horizon}d")
+            if ret is not None:
+                pattern_stats[key]["outcomes"].append({
+                    "return": ret,
+                    "correct": correct,
+                    "signal_type": s["signal_type"],
+                    "return_5d": s.get("return_5d"),
+                    "return_10d": s.get("return_10d"),
+                })
+                pattern_stats[key]["directions"].append(p["direction"])
+
+    patterns_analysis = {}
+    for name, data in pattern_stats.items():
+        outs = data["outcomes"]
+        if len(outs) < 2:
+            continue
+        rets = [o["return"] for o in outs]
+        corrects = [o["correct"] for o in outs if o["correct"] is not None]
+        r5  = [o["return_5d"]  for o in outs if o.get("return_5d")  is not None]
+        r10 = [o["return_10d"] for o in outs if o.get("return_10d") is not None]
+        patterns_analysis[name] = {
+            "occurrences": len(outs),
+            "win_rate_pct": round(sum(corrects) / len(corrects) * 100, 1) if corrects else None,
+            "avg_return_pct": round(float(np.mean(rets)), 2),
+            "avg_return_5d": round(float(np.mean(r5)), 2) if r5 else None,
+            "avg_return_10d": round(float(np.mean(r10)), 2) if r10 else None,
+        }
+    # Tri par occurrences décroissantes
+    patterns_analysis = dict(
+        sorted(patterns_analysis.items(), key=lambda x: x[1]["occurrences"], reverse=True)
+    )
+
+    # ── 5.5.6 Détection de sur-trading ────────────────────────────────────
+    OVERTRADING_FREQ_THRESHOLD = 30   # > 30 signaux/an = suspect
+    OVERTRADING_FREQ_EXTREME   = 60   # > 60 signaux/an = sur-trading sévère
+    over_traded = signal_frequency > OVERTRADING_FREQ_THRESHOLD
+
+    overtrading_diagnosis = {
+        "is_over_traded": over_traded,
+        "signal_frequency_per_year": signal_frequency,
+        "threshold": OVERTRADING_FREQ_THRESHOLD,
+        "severity": (
+            "severe" if signal_frequency > OVERTRADING_FREQ_EXTREME
+            else "moderate" if over_traded
+            else "none"
+        ),
+    }
+
+    # ── 5.5.7 Label automatique ───────────────────────────────────────────
+    win_rate_all = _winrate_for(valid, horizon) or 0.0
+    sharpe_all   = _sharpe(valid, horizon) or 0.0
+    cum_rets     = [s[f"return_{horizon}d"] for s in valid if s.get(f"return_{horizon}d") is not None]
+    cum_final    = float(np.prod([1 + r / 100 for r in cum_rets]) - 1) * 100 if cum_rets else 0.0
+
+    label: str
+    label_reason: str
+
+    if over_traded and win_rate_all < 55:
+        label = "over_traded"
+        label_reason = f"Trop de signaux ({signal_frequency:.0f}/an) avec win rate faible ({win_rate_all:.1f}%)"
+    elif stability_delta > 20:
+        label = "unstable"
+        label_reason = f"Win rate instable : {wr_first}% → {wr_second}% (écart {stability_delta}pts)"
+    elif sharpe_all >= 1.2 and win_rate_all >= 60:
+        label = "robust"
+        label_reason = f"Sharpe {sharpe_all:.2f} + win rate {win_rate_all:.1f}% — moteur bien calibré"
+    elif win_rate_all >= 55 and not over_traded:
+        label = "noisy"
+        label_reason = f"Win rate correct ({win_rate_all:.1f}%) mais Sharpe faible ({sharpe_all:.2f})"
+    elif cum_final < -20:
+        label = "bearish_asset"
+        label_reason = f"Retour cumulé négatif ({cum_final:.1f}%) — actif en tendance baissière sur la période"
+    else:
+        label = "mixed"
+        label_reason = f"Résultats mixtes — win rate {win_rate_all:.1f}%, Sharpe {sharpe_all:.2f}"
+
+    # ── 5.5.8 Recommandation ──────────────────────────────────────────────
+    if label == "robust":
+        recommendation = "keep"
+        recommendation_reason = "Actif fiable — conserver dans la watchlist active"
+    elif label in ("over_traded", "unstable"):
+        recommendation = "monitor"
+        recommendation_reason = "Performances dégradées — surveiller avant d'agir sur les signaux"
+    elif label == "bearish_asset":
+        recommendation = "exclude"
+        recommendation_reason = "Tendance structurellement baissière — exclure ou filtrer SELL uniquement"
+    elif label == "noisy":
+        recommendation = "monitor"
+        recommendation_reason = "Signal utile mais dispersé — augmenter le seuil de confiance minimum"
+    else:
+        recommendation = "monitor"
+        recommendation_reason = "Résultats insuffisants pour conclusion — continuer l'observation"
+
+    return {
+        "signal_quality": signal_quality,
+        "score_calibration": score_calibration,
+        "confidence_calibration": confidence_calibration,
+        "by_signal_type": by_signal_type,
+        "patterns_analysis": patterns_analysis,
+        "overtrading": overtrading_diagnosis,
+        "label": label,
+        "label_reason": label_reason,
+        "recommendation": recommendation,
+        "recommendation_reason": recommendation_reason,
+    }
+
+
 async def run_backtest(
     ticker: str,
     period: str = "5y",
@@ -261,8 +502,9 @@ async def run_backtest(
     metrics = _compute_metrics(signals, horizon=horizon_days)
     benchmarks = _compute_benchmarks(df, start_idx=_MIN_HISTORY, horizon=horizon_days)
 
-    buy_sigs = [s for s in signals if s["signal_type"] == "BUY"]
+    buy_sigs  = [s for s in signals if s["signal_type"] == "BUY"]
     sell_sigs = [s for s in signals if s["signal_type"] == "SELL"]
+    diagnostics = _compute_diagnostics(signals, df, horizon=horizon_days)
 
     return {
         "ticker": ticker.upper(),
@@ -272,11 +514,14 @@ async def run_backtest(
         "sell_signals": len(sell_sigs),
         "metrics": metrics,
         "benchmarks": benchmarks,
+        "diagnostics": diagnostics,
         "signals": [
             {
                 "date": s["date"].isoformat(),
                 "signal_type": s["signal_type"],
                 "score": s["score"],
+                "tech_score": s.get("tech_score"),
+                "mom_score": s.get("mom_score"),
                 "confidence": s["confidence"],
                 "confidence_label": s["confidence_label"],
                 "price": s["price"],
@@ -284,6 +529,7 @@ async def run_backtest(
                 "return_10d": s.get("return_10d"),
                 "return_20d": s.get("return_20d"),
                 "correct_20d": s.get("correct_20d"),
+                "patterns": s.get("patterns", []),
             }
             for s in signals
         ],
