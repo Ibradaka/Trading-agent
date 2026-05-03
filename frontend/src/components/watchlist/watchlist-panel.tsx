@@ -291,14 +291,19 @@ function AddAssetModal({ watchlistId, onClose }: { watchlistId: string; onClose:
 
   const mutation = useMutation({
     mutationFn: async (t: string) => {
-      await api.assets.validateAndAdd(t);
+      const res = await api.assets.validateAndAdd(t);
+      if ("error" in res && res.error) throw new Error(res.error as string);
       return api.watchlists.addAsset(watchlistId, t);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["watchlist-signals", watchlistId] });
       onClose();
     },
-    onError: (e: Error) => setError(e.message || "Ticker invalide ou déjà présent"),
+    onError: (e: Error) => setError(
+      e.message.includes("not found") || e.message.includes("No market data")
+        ? "Ticker introuvable. Vérifiez le suffixe (ex: SOI.PA, MC.PA pour les valeurs françaises)"
+        : e.message || "Ticker invalide ou déjà présent"
+    ),
   });
 
   const submit = () => {
@@ -338,7 +343,9 @@ function AddAssetModal({ watchlistId, onClose }: { watchlistId: string; onClose:
           </button>
         </div>
         {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-        <p className="mt-2 text-xs text-slate-600">Ticker Yahoo Finance (ex: NVDA, MC.PA, ISLN.L)</p>
+        <p className="mt-2 text-xs text-slate-600">
+          Suffixes : <span className="text-slate-500">.PA</span> France · <span className="text-slate-500">.L</span> Londres · <span className="text-slate-500">.DE</span> Allemagne · <span className="text-slate-500">.MI</span> Italie
+        </p>
       </div>
     </div>
   );
