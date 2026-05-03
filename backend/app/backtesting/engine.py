@@ -14,7 +14,6 @@ from app.scoring.technical import compute_technical_score, compute_momentum_scor
 from app.scoring.composite import compute_composite_score, compute_fusion_score
 from app.agents.confidence import compute_confidence
 from app.agents.technical import compute_indicators
-from app.agents.patterns import detect_all_patterns_sync
 
 logger = structlog.get_logger()
 
@@ -127,12 +126,6 @@ def _simulate_signals(
         if conf["score"] / 100.0 < min_confidence:
             continue
 
-        # Patterns actifs sur la fenêtre courante
-        try:
-            active_patterns = detect_all_patterns_sync(window)
-        except Exception:
-            active_patterns = []
-
         signals.append({
             "date": df.index[i],
             "signal_type": fusion["signal_type"],
@@ -143,10 +136,7 @@ def _simulate_signals(
             "confidence_label": conf["label"],
             "price": round(float(df.iloc[i]["close"]), 2),
             "idx": i,
-            "patterns": [
-                {"name": p["pattern_name"], "direction": p["direction"], "strength": p["strength"]}
-                for p in active_patterns
-            ],
+            "patterns": [],  # détection patterns non rejouée en backtest (trop lente + pas de TA-Lib)
         })
         last_signal_idx = i
 
