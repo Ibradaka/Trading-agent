@@ -244,7 +244,7 @@ async def _fetch_signal_for_ticker(ticker: str) -> dict | None:
 # ──────────────────────────────────────────────
 
 async def _should_alert(ticker: str, score: float, confidence_label: str) -> bool:
-    from app.routers.settings import get_settings
+    from app.routers.system import get_settings
     cfg = await get_settings()
     if cfg.get("panic_mode"):
         return False

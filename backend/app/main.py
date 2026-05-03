@@ -8,7 +8,7 @@ from app.database import init_db, close_db
 from app.services.redis_client import init_redis, close_redis
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.telegram import start_telegram_bot, stop_telegram_bot
-from app.routers import watchlist, signals, assets, sse, portfolio, backtest, settings
+from app.routers import watchlist, signals, assets, sse, portfolio, backtest, system
 from app.seed import run_seed
 
 logger = structlog.get_logger()
@@ -54,7 +54,7 @@ app.include_router(assets.router, prefix="/api/assets", tags=["assets"])
 app.include_router(sse.router, prefix="/api/stream", tags=["stream"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
-app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(system.router, prefix="/api/settings", tags=["settings"])
 
 
 @app.get("/health", tags=["system"])
