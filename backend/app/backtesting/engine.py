@@ -24,7 +24,7 @@ _COOLDOWN_DAYS = 4  # jours minimum entre deux signaux (cohérent avec risk.py)
 def _fetch_history(ticker: str, period: str = "5y") -> pd.DataFrame:
     """Fetch historique OHLC depuis yfinance (synchrone)."""
     try:
-        df = yf.Ticker(ticker, session=get_yf_session()).history(
+        df = yf.Ticker(ticker).history(
             period=period, interval="1d", auto_adjust=True
         )
         if df.empty:

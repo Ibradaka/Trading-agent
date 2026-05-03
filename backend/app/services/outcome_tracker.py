@@ -18,7 +18,7 @@ logger = structlog.get_logger()
 def _fetch_latest_close(ticker: str) -> float | None:
     """Prix de clôture le plus récent (synchrone — via asyncio.to_thread)."""
     try:
-        df = yf.Ticker(ticker, session=get_yf_session()).history(
+        df = yf.Ticker(ticker).history(
             period="5d", interval="1d", auto_adjust=True
         )
         if df.empty:
