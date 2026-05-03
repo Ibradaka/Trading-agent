@@ -7,7 +7,6 @@ import { Plus, Loader2, TrendingUp, TrendingDown, Minus, X, Search } from "lucid
 import Link from "next/link";
 import { cn, signalLabel, scoreToColor, formatScore, formatAssetPrice } from "@/lib/utils";
 import { useSSE } from "@/lib/sse";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   LineChart,
   Line,
