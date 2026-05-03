@@ -244,7 +244,13 @@ async def _fetch_signal_for_ticker(ticker: str) -> dict | None:
 # ──────────────────────────────────────────────
 
 async def _should_alert(ticker: str, score: float, confidence_label: str) -> bool:
-    threshold = getattr(settings, "signal_alert_threshold", 0.70)
+    from app.routers.settings import get_settings
+    cfg = await get_settings()
+    if cfg.get("panic_mode"):
+        return False
+    if not cfg.get("telegram_enabled", True):
+        return False
+    threshold = cfg.get("alert_threshold", 0.70)
     if score / 100.0 < threshold:
         return False
     if confidence_label not in ("medium", "high"):

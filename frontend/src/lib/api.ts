@@ -208,6 +208,29 @@ export interface BacktestResult {
   }>;
 }
 
+export interface SystemSettings {
+  telegram_enabled: boolean;
+  panic_mode: boolean;
+  alert_threshold: number;
+  min_confidence: number;
+  cooldown_minutes: number;
+  quiet_start: number;
+  quiet_end: number;
+  daily_digest: boolean;
+  buy_threshold: number;
+  sell_threshold: number;
+}
+
+export interface SystemStatus {
+  panic_mode: boolean;
+  telegram_enabled: boolean;
+  market_open: boolean;
+  last_signal_at: string | null;
+  sentiment_available: boolean;
+  macro_available: boolean;
+  timestamp: string;
+}
+
 export interface WatchlistSignalEntry {
   ticker: string;
   name: string;
@@ -303,4 +326,16 @@ export const api = {
   },
 
   health: () => request<{ status: string; version: string }>("/health"),
+
+  settings: {
+    get: () => request<SystemSettings>("/api/settings"),
+    update: (data: Partial<SystemSettings>) =>
+      request<SystemSettings>("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    togglePanic: () =>
+      request<{ panic_mode: boolean }>("/api/settings/panic", { method: "POST" }),
+    status: () => request<SystemStatus>("/api/settings/status"),
+  },
 };
