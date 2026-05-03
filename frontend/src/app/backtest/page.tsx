@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, BacktestResult } from "@/lib/api";
+import { api, BacktestResult, BacktestDiagnostics } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function KpiCard({ label, value, sub, highlight }: { label: string; value: string | null; sub?: string; highlight?: "good" | "bad" | "neutral" }) {
@@ -11,6 +11,54 @@ function KpiCard({ label, value, sub, highlight }: { label: string; value: strin
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <p className={cn("text-2xl font-semibold", highlight ? colors[highlight] : "text-slate-100")}>{value ?? "—"}</p>
       {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+const LABEL_CONFIG: Record<string, { color: string; bg: string; icon: string }> = {
+  robust:       { color: "text-emerald-400", bg: "bg-emerald-900/20 border-emerald-800",  icon: "✦" },
+  noisy:        { color: "text-amber-400",   bg: "bg-amber-900/20 border-amber-800",      icon: "~" },
+  over_traded:  { color: "text-orange-400",  bg: "bg-orange-900/20 border-orange-800",    icon: "!" },
+  unstable:     { color: "text-red-400",     bg: "bg-red-900/20 border-red-800",          icon: "≈" },
+  bearish_asset:{ color: "text-red-500",     bg: "bg-red-900/30 border-red-700",          icon: "↓" },
+  mixed:        { color: "text-slate-400",   bg: "bg-slate-800/50 border-slate-700",      icon: "?" },
+};
+
+const REC_CONFIG: Record<string, { color: string; label: string }> = {
+  keep:    { color: "text-emerald-400", label: "Conserver" },
+  monitor: { color: "text-amber-400",   label: "Surveiller" },
+  exclude: { color: "text-red-400",     label: "Exclure" },
+};
+
+function DiagnosticBanner({ d }: { d: BacktestDiagnostics }) {
+  const lc = LABEL_CONFIG[d.label] ?? LABEL_CONFIG.mixed;
+  const rc = REC_CONFIG[d.recommendation] ?? REC_CONFIG.monitor;
+  return (
+    <div className={cn("border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3", lc.bg)}>
+      <div className="flex items-center gap-3 flex-1">
+        <span className={cn("text-2xl font-bold w-8 text-center", lc.color)}>{lc.icon}</span>
+        <div>
+          <div className="flex items-center gap-2">
+            <span className={cn("text-sm font-semibold uppercase tracking-wide", lc.color)}>{d.label.replace("_", " ")}</span>
+            <span className="text-slate-600">·</span>
+            <span className={cn("text-sm font-medium", rc.color)}>{rc.label}</span>
+          </div>
+          <p className="text-xs text-slate-400 mt-0.5">{d.label_reason}</p>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500 sm:text-right sm:max-w-xs">{d.recommendation_reason}</p>
+    </div>
+  );
+}
+
+function StatRow({ label, value, sub }: { label: string; value: string | null; sub?: string }) {
+  return (
+    <div className="flex justify-between items-center py-1.5 border-b border-slate-800/50 last:border-0">
+      <span className="text-xs text-slate-500">{label}</span>
+      <div className="text-right">
+        <span className="text-sm text-slate-200 font-medium">{value ?? "—"}</span>
+        {sub && <span className="text-xs text-slate-600 ml-1">{sub}</span>}
+      </div>
     </div>
   );
 }
@@ -199,6 +247,102 @@ export default function BacktestPage() {
               </div>
             )}
           </div>
+
+          {/* Diagnostic Phase 5.5 */}
+          {result.diagnostics && (() => {
+            const d = result.diagnostics!;
+            const sq = d.signal_quality;
+            return (
+              <div className="space-y-4">
+                {/* Bannière label + recommandation */}
+                <DiagnosticBanner d={d} />
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Qualité des signaux */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <h3 className="text-sm font-medium text-slate-300 mb-3">Qualité des signaux</h3>
+                    <StatRow label="Fréquence" value={`${sq.signal_frequency_per_year} / an`} />
+                    <StatRow label="Faux signaux" value={sq.false_signal_rate_pct != null ? `${sq.false_signal_rate_pct}%` : null} />
+                    <StatRow label="Dispersion retours" value={`${sq.return_dispersion_p25}% → ${sq.return_dispersion_p75}%`} sub="P25/P75" />
+                    <StatRow label="Stabilité (1ère moitié)" value={sq.stability_first_half_wr != null ? `${sq.stability_first_half_wr}%` : null} />
+                    <StatRow label="Stabilité (2ème moitié)" value={sq.stability_second_half_wr != null ? `${sq.stability_second_half_wr}%` : null} />
+                    <StatRow
+                      label="Delta stabilité"
+                      value={`${sq.stability_delta_pct} pts`}
+                    />
+                    {d.overtrading.is_over_traded && (
+                      <div className="mt-2 px-2 py-1 bg-orange-900/20 border border-orange-800/50 rounded text-xs text-orange-400">
+                        Sur-trading détecté ({d.overtrading.severity})
+                      </div>
+                    )}
+                  </div>
+
+                  {/* BUY vs SELL */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <h3 className="text-sm font-medium text-slate-300 mb-3">Performance par type</h3>
+                    {Object.entries(d.by_signal_type).map(([type, stats]) => (
+                      <div key={type} className="mb-3 last:mb-0">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className={cn(
+                            "px-1.5 py-0.5 rounded text-xs font-medium",
+                            type === "BUY" ? "bg-emerald-900/50 text-emerald-400" : "bg-red-900/50 text-red-400"
+                          )}>{type}</span>
+                          <span className="text-xs text-slate-500">{stats.n} signaux</span>
+                        </div>
+                        <StatRow label="Win rate" value={stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : null} />
+                        <StatRow label="Retour moyen" value={stats.avg_return_pct != null ? `${stats.avg_return_pct > 0 ? "+" : ""}${stats.avg_return_pct}%` : null} />
+                        <StatRow label="Sharpe" value={stats.sharpe != null ? stats.sharpe.toFixed(2) : null} />
+                      </div>
+                    ))}
+                    {Object.keys(d.by_signal_type).length === 0 && (
+                      <p className="text-xs text-slate-600">Aucun signal valide</p>
+                    )}
+                  </div>
+
+                  {/* Calibration score */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <h3 className="text-sm font-medium text-slate-300 mb-3">Calibration par score</h3>
+                    {Object.entries(d.score_calibration).map(([bucket, stats]) => (
+                      <div key={bucket} className="flex justify-between items-center py-1.5 border-b border-slate-800/50 last:border-0">
+                        <div>
+                          <span className="text-xs text-slate-400">Score {bucket}</span>
+                          <span className="text-xs text-slate-600 ml-1">({stats.n})</span>
+                        </div>
+                        <span className={cn(
+                          "text-sm font-medium",
+                          stats.win_rate_pct == null ? "text-slate-600" :
+                          stats.win_rate_pct >= 60 ? "text-emerald-400" :
+                          stats.win_rate_pct < 45 ? "text-red-400" : "text-amber-400"
+                        )}>
+                          {stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : "—"}
+                        </span>
+                      </div>
+                    ))}
+                    <h3 className="text-sm font-medium text-slate-300 mt-4 mb-2">Par confiance</h3>
+                    {Object.entries(d.confidence_calibration).map(([label, stats]) => (
+                      <div key={label} className="flex justify-between items-center py-1.5 border-b border-slate-800/50 last:border-0">
+                        <div>
+                          <span className={cn(
+                            "text-xs",
+                            label === "high" ? "text-blue-400" : label === "medium" ? "text-amber-400" : "text-slate-500"
+                          )}>{label}</span>
+                          <span className="text-xs text-slate-600 ml-1">({stats.n})</span>
+                        </div>
+                        <span className={cn(
+                          "text-sm font-medium",
+                          stats.win_rate_pct == null ? "text-slate-600" :
+                          stats.win_rate_pct >= 60 ? "text-emerald-400" :
+                          stats.win_rate_pct < 45 ? "text-red-400" : "text-amber-400"
+                        )}>
+                          {stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Signaux simulés */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">

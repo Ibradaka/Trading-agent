@@ -181,6 +181,48 @@ export interface BacktestMetrics {
   };
 }
 
+export interface BacktestDiagnostics {
+  label: "robust" | "noisy" | "over_traded" | "unstable" | "bearish_asset" | "mixed";
+  label_reason: string;
+  recommendation: "keep" | "monitor" | "exclude";
+  recommendation_reason: string;
+  signal_quality: {
+    total_signals: number;
+    buy_count: number;
+    sell_count: number;
+    signal_frequency_per_year: number;
+    false_signal_rate_pct: number | null;
+    return_std_pct: number;
+    return_dispersion_p25: number;
+    return_dispersion_p75: number;
+    stability_first_half_wr: number | null;
+    stability_second_half_wr: number | null;
+    stability_delta_pct: number;
+  };
+  score_calibration: Record<string, { n: number; win_rate_pct: number | null; avg_return_pct: number | null }>;
+  confidence_calibration: Record<string, { n: number; win_rate_pct: number | null; avg_return_pct: number | null }>;
+  by_signal_type: Record<string, {
+    n: number;
+    win_rate_pct: number | null;
+    avg_return_pct: number | null;
+    sharpe: number | null;
+    max_drawdown_pct?: number;
+  }>;
+  patterns_analysis: Record<string, {
+    occurrences: number;
+    win_rate_pct: number | null;
+    avg_return_pct: number;
+    avg_return_5d: number | null;
+    avg_return_10d: number | null;
+  }>;
+  overtrading: {
+    is_over_traded: boolean;
+    signal_frequency_per_year: number;
+    threshold: number;
+    severity: "none" | "moderate" | "severe";
+  };
+}
+
 export interface BacktestResult {
   ticker: string;
   period: string;
@@ -194,10 +236,13 @@ export interface BacktestResult {
     momentum_avg_return_pct: number;
     ma_crossover_avg_return_pct: number;
   };
+  diagnostics?: BacktestDiagnostics;
   signals: Array<{
     date: string;
     signal_type: string;
     score: number;
+    tech_score?: number;
+    mom_score?: number;
     confidence: number;
     confidence_label: string;
     price: number;
@@ -298,6 +343,11 @@ export const api = {
       request<BacktestResult>(`/api/backtest/${encodeURIComponent(ticker)}?period=${period}&horizon_days=${horizonDays}`),
     tickerAccuracy: (ticker: string) =>
       request<{ ticker: string; total_tracked: number; accuracy_pct?: number; avg_return_pct?: number }>(`/api/backtest/${encodeURIComponent(ticker)}/accuracy`),
+    multi: (tickers: string[], period = "5y", horizonDays = 20) =>
+      request<{ results: BacktestResult[]; comparison: Array<Record<string, unknown>> }>("/api/backtest/multi", {
+        method: "POST",
+        body: JSON.stringify({ tickers, period, horizon_days: horizonDays }),
+      }),
   },
 
   portfolio: {
