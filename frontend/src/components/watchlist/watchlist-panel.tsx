@@ -160,7 +160,7 @@ function AssetRow({
   watchlistId: string;
   onRemove: (ticker: string) => void;
 }) {
-  const { ticker, name, is_pea_eligible, asset_type, signal } = entry;
+  const { ticker, name, signal } = entry;
 
   return (
     <div className="relative flex items-center gap-3 px-4 py-3 hover:bg-slate-800/50 rounded-lg transition-colors group">
@@ -170,15 +170,6 @@ function AssetRow({
       <div className="w-28 flex-shrink-0 relative z-10">
         <p className="text-sm font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">{ticker}</p>
         <p className="text-xs text-slate-500 truncate max-w-[112px]">{name}</p>
-      </div>
-
-      {/* Badges */}
-      <div className="flex gap-1 flex-shrink-0 w-16 relative z-10">
-        {is_pea_eligible && (
-          <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded">
-            PEA
-          </span>
-        )}
       </div>
 
       {/* Prix + sparkline */}
@@ -282,7 +273,6 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
       {/* En-têtes */}
       <div className="flex items-center gap-3 px-4 py-2 text-xs text-slate-600 border-b border-slate-800 mb-1">
         <span className="w-28">Actif</span>
-        <span className="w-16"></span>
         <span className="flex-1">Prix · 1J / 1S / 1M</span>
         <span className="w-24 text-right">P&L position</span>
         <span className="w-28 text-center">Signal</span>
