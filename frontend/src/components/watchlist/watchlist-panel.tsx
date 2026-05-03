@@ -149,22 +149,31 @@ function PnLCell({ ticker, position }: { ticker: string; position: Position | un
   );
 }
 
-function AssetRow({ entry, position }: { entry: WatchlistSignalEntry; position: Position | undefined }) {
+function AssetRow({
+  entry,
+  position,
+  watchlistId,
+  onRemove,
+}: {
+  entry: WatchlistSignalEntry;
+  position: Position | undefined;
+  watchlistId: string;
+  onRemove: (ticker: string) => void;
+}) {
   const { ticker, name, is_pea_eligible, asset_type, signal } = entry;
 
   return (
-    <Link
-      href={`/asset/${ticker}`}
-      className="flex items-center gap-3 px-4 py-3 hover:bg-slate-800/50 rounded-lg transition-colors group"
-    >
+    <div className="relative flex items-center gap-3 px-4 py-3 hover:bg-slate-800/50 rounded-lg transition-colors group">
+      <Link href={`/asset/${ticker}`} className="absolute inset-0 rounded-lg" />
+
       {/* Ticker + nom */}
-      <div className="w-28 flex-shrink-0">
+      <div className="w-28 flex-shrink-0 relative z-10">
         <p className="text-sm font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">{ticker}</p>
         <p className="text-xs text-slate-500 truncate max-w-[112px]">{name}</p>
       </div>
 
       {/* Badges */}
-      <div className="flex gap-1 flex-shrink-0 w-20">
+      <div className="flex gap-1 flex-shrink-0 w-20 relative z-10">
         {is_pea_eligible && (
           <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded">
             PEA
@@ -178,17 +187,17 @@ function AssetRow({ entry, position }: { entry: WatchlistSignalEntry; position: 
       </div>
 
       {/* Prix + sparkline */}
-      <div className="flex-1">
+      <div className="flex-1 relative z-10">
         <PriceCell ticker={ticker} />
       </div>
 
       {/* P&L si position ouverte */}
-      <div className="w-24 flex-shrink-0 text-right">
+      <div className="w-24 flex-shrink-0 text-right relative z-10">
         <PnLCell ticker={ticker} position={position} />
       </div>
 
       {/* Signal */}
-      <div className="w-28 flex-shrink-0 text-center">
+      <div className="w-28 flex-shrink-0 text-center relative z-10">
         {signal ? (
           <SignalBadge type={signal.signal_type} strength={signal.strength} />
         ) : (
@@ -197,7 +206,7 @@ function AssetRow({ entry, position }: { entry: WatchlistSignalEntry; position: 
       </div>
 
       {/* Score */}
-      <div className="w-16 text-right flex-shrink-0">
+      <div className="w-16 text-right flex-shrink-0 relative z-10">
         {signal ? (
           <div>
             <span className={cn("text-sm font-mono font-semibold", scoreToColor(signal.composite_score))}>
@@ -209,7 +218,16 @@ function AssetRow({ entry, position }: { entry: WatchlistSignalEntry; position: 
           <span className="text-xs text-slate-700">—</span>
         )}
       </div>
-    </Link>
+
+      {/* Bouton supprimer — visible au survol */}
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(ticker); }}
+        className="relative z-10 opacity-0 group-hover:opacity-100 transition-opacity ml-1 p-1 text-slate-600 hover:text-red-400 hover:bg-red-900/20 rounded"
+        title="Retirer de la watchlist"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+    </div>
   );
 }
 
@@ -232,6 +250,11 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
     queryKey: ["positions"],
     queryFn: api.portfolio.positions,
     staleTime: 60_000,
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (ticker: string) => api.watchlists.removeAsset(watchlistId, ticker),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist-signals", watchlistId] }),
   });
 
   if (isLoading) {
@@ -275,6 +298,8 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
           key={entry.ticker}
           entry={entry}
           position={positions.find((p) => p.ticker === entry.ticker && p.is_active)}
+          watchlistId={watchlistId}
+          onRemove={(ticker) => removeMutation.mutate(ticker)}
         />
       ))}
     </div>
