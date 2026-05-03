@@ -76,6 +76,24 @@ async def _run_outcome_tracking() -> None:
         logger.exception("Outcome tracking failed")
 
 
+async def _run_daily_digest() -> None:
+    """Digest Telegram matinal + flush signaux quiet hours."""
+    try:
+        from app.services.telegram import send_daily_digest
+        await send_daily_digest()
+    except Exception:
+        logger.exception("Daily digest failed")
+
+
+async def _run_flush_pending() -> None:
+    """Flush signaux Telegram mis en attente pendant les quiet hours (07h00)."""
+    try:
+        from app.services.telegram import _flush_pending_signals
+        await _flush_pending_signals()
+    except Exception:
+        logger.exception("Flush pending signals failed")
+
+
 async def start_scheduler() -> None:
     refresh_min = settings.default_refresh_minutes
 
@@ -108,6 +126,22 @@ async def start_scheduler() -> None:
         _run_outcome_tracking,
         trigger=CronTrigger(hour=20, minute=0, timezone="Europe/Paris"),
         id="outcome_tracking",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    _scheduler.add_job(
+        _run_daily_digest,
+        trigger=CronTrigger(hour=8, minute=0, timezone="Europe/Paris"),
+        id="daily_digest",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    _scheduler.add_job(
+        _run_flush_pending,
+        trigger=CronTrigger(hour=7, minute=0, timezone="Europe/Paris"),
+        id="flush_pending_signals",
         replace_existing=True,
         max_instances=1,
     )

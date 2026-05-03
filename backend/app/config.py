@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    signal_alert_threshold: float = 0.70
+    dashboard_url: str = ""
 
     # App
     app_env: str = "development"

@@ -7,6 +7,7 @@ from app.config import settings
 from app.database import init_db, close_db
 from app.services.redis_client import init_redis, close_redis
 from app.services.scheduler import start_scheduler, stop_scheduler
+from app.services.telegram import start_telegram_bot, stop_telegram_bot
 from app.routers import watchlist, signals, assets, sse, portfolio
 from app.seed import run_seed
 
@@ -20,9 +21,11 @@ async def lifespan(app: FastAPI):
     await init_redis()
     await run_seed()
     await start_scheduler()
+    await start_telegram_bot()
     logger.info("All services started — ready to trade")
     yield
     logger.info("Shutting down Trading Agent API")
+    await stop_telegram_bot()
     await stop_scheduler()
     await close_redis()
     await close_db()
