@@ -1,9 +1,45 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, AgentStatus } from "@/lib/api";
 import { TrendingUp, TrendingDown, Activity, ShieldAlert, BellOff, WifiOff, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+function AgentDot({ agent }: { agent: AgentStatus }) {
+  const [open, setOpen] = useState(false);
+
+  const dotColor =
+    agent.status === "ok" && agent.elapsed_seconds !== null && agent.elapsed_seconds < 1800
+      ? "bg-emerald-500"
+      : agent.status === "error"
+      ? "bg-red-500"
+      : "bg-slate-600";
+
+  return (
+    <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button className="flex items-center gap-1 group">
+        <span className={cn("w-2 h-2 rounded-full flex-shrink-0", dotColor)} />
+        <span className="text-xs text-slate-500 group-hover:text-slate-300 transition-colors hidden sm:inline">
+          {agent.label}
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-3 pointer-events-none">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className={cn("w-2 h-2 rounded-full flex-shrink-0", dotColor)} />
+            <span className="text-xs font-semibold text-slate-200">{agent.label}</span>
+          </div>
+          <p className="text-xs text-slate-400">{agent.ago}</p>
+          <p className="text-xs text-slate-500 mt-0.5 truncate">{agent.result}</p>
+          {/* flèche */}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-700" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function SummaryBar() {
   const { data: signals = [] } = useQuery({
@@ -16,6 +52,12 @@ export function SummaryBar() {
     queryKey: ["system-status"],
     queryFn: api.settings.status,
     refetchInterval: 30_000,
+  });
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents-status"],
+    queryFn: api.agents.status,
+    refetchInterval: 60_000,
   });
 
   const buyCount = signals.filter((s) => s.signal_type === "BUY").length;
@@ -38,7 +80,8 @@ export function SummaryBar() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-6 px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800">
+      <div className="flex items-center gap-4 px-4 py-2.5 bg-slate-900 rounded-xl border border-slate-800 flex-wrap">
+        {/* Signaux */}
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Activity className="w-3.5 h-3.5" />
           <span>Signaux</span>
@@ -58,6 +101,20 @@ export function SummaryBar() {
           </div>
         </div>
 
+        {/* Séparateur */}
+        {agents.length > 0 && <span className="text-slate-700 hidden sm:inline">|</span>}
+
+        {/* Agents */}
+        {agents.length > 0 && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-600 hidden sm:inline">Agents</span>
+            {agents.map((agent) => (
+              <AgentDot key={agent.id} agent={agent} />
+            ))}
+          </div>
+        )}
+
+        {/* Alertes système */}
         {alerts.length > 0 && (
           <div className="ml-auto flex items-center gap-4">
             {alerts.map(({ icon: Icon, label, color }, i) => (

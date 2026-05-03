@@ -249,3 +249,5 @@ async def compute_all_indicators() -> None:
 
     await asyncio.gather(*[_process(t, aid) for t, aid in tickers])
     logger.info("Indicators done", count=len(tickers))
+    from app.services.redis_client import agent_heartbeat
+    await agent_heartbeat("technical", f"{len(tickers)} actifs")

@@ -527,8 +527,13 @@ async def filter_and_score_all() -> None:
                 confidence_label=confidence_ctx["label"],
                 macro_regime=macro_regime,
             )
+            from app.services.redis_client import agent_heartbeat
+            await agent_heartbeat("llm", f"{ticker} {fusion['signal_type']} score={fusion['score']:.0f}")
         except Exception:
             logger.exception("Signal scoring failed", ticker=ticker)
 
+    n_signals = sum(1 for t, _ in tickers if True)  # compte les actifs traités
     await asyncio.gather(*[_process(t, aid) for t, aid in tickers])
     logger.info("Scoring complete", count=len(tickers))
+    from app.services.redis_client import agent_heartbeat
+    await agent_heartbeat("risk_score", f"{len(tickers)} actifs scorés")

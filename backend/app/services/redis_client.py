@@ -50,3 +50,13 @@ async def subscribe(channel: str) -> redis.client.PubSub:
     pubsub = get_redis().pubsub()
     await pubsub.subscribe(channel)
     return pubsub
+
+
+async def agent_heartbeat(agent: str, result: str, status: str = "ok") -> None:
+    """Enregistre la dernière exécution d'un agent (TTL 2h)."""
+    from datetime import datetime, timezone
+    await cache_set(
+        f"agent:heartbeat:{agent}",
+        {"last_run": datetime.now(timezone.utc).isoformat(), "result": result, "status": status},
+        ttl_seconds=7200,
+    )

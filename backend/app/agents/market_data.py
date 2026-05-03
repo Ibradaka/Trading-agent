@@ -115,3 +115,5 @@ async def fetch_all_active_assets() -> None:
 
     await asyncio.gather(*[_process(t, aid) for t, aid in tickers])
     logger.info("OHLC fetch complete", count=len(tickers))
+    from app.services.redis_client import agent_heartbeat
+    await agent_heartbeat("market_data", f"{len(tickers)} actifs")

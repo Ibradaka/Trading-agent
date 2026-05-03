@@ -215,3 +215,5 @@ async def update_macro_context() -> None:
         t10y2y=t10y2y,
         t10yie=t10yie,
     )
+    from app.services.redis_client import agent_heartbeat
+    await agent_heartbeat("macro", f"régime {regime} score {score}")

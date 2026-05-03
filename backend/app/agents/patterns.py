@@ -320,3 +320,5 @@ async def detect_all_patterns() -> None:
 
     await asyncio.gather(*[_process(t, aid) for t, aid in tickers])
     logger.info("Patterns complete", count=len(tickers))
+    from app.services.redis_client import agent_heartbeat
+    await agent_heartbeat("patterns", f"{len(tickers)} actifs")

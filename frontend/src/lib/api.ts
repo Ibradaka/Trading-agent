@@ -276,6 +276,17 @@ export interface SystemStatus {
   timestamp: string;
 }
 
+export interface AgentStatus {
+  id: string;
+  label: string;
+  icon: string;
+  status: "ok" | "error" | "unknown";
+  last_run: string | null;
+  elapsed_seconds: number | null;
+  ago: string;
+  result: string;
+}
+
 export interface WatchlistSignalEntry {
   ticker: string;
   name: string;
@@ -387,5 +398,9 @@ export const api = {
     togglePanic: () =>
       request<{ panic_mode: boolean }>("/api/settings/panic", { method: "POST" }),
     status: () => request<SystemStatus>("/api/settings/status"),
+  },
+
+  agents: {
+    status: () => request<AgentStatus[]>("/api/settings/agents"),
   },
 };

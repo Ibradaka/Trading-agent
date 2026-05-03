@@ -127,3 +127,59 @@ async def system_status():
         "macro_available": macro_cached,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+_AGENT_META = {
+    "market_data": {"label": "Market Data",  "icon": "📥"},
+    "technical":   {"label": "Technical",    "icon": "📊"},
+    "patterns":    {"label": "Patterns",     "icon": "🕯"},
+    "sentiment":   {"label": "Sentiment",    "icon": "📰"},
+    "macro":       {"label": "Macro FRED",   "icon": "🏦"},
+    "risk_score":  {"label": "Risk/Score",   "icon": "⚡"},
+    "llm":         {"label": "LLM",          "icon": "🤖"},
+}
+
+
+@router.get("/agents")
+async def agents_status():
+    """Statut de la dernière exécution de chaque agent (lu depuis Redis)."""
+    from app.services.redis_client import cache_get
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    result = []
+
+    for agent_id, meta in _AGENT_META.items():
+        hb = await cache_get(f"agent:heartbeat:{agent_id}")
+        if hb:
+            last_run = datetime.fromisoformat(hb["last_run"])
+            elapsed_s = int((now - last_run).total_seconds())
+            if elapsed_s < 60:
+                ago = "à l'instant"
+            elif elapsed_s < 3600:
+                ago = f"il y a {elapsed_s // 60} min"
+            else:
+                ago = f"il y a {elapsed_s // 3600}h"
+            result.append({
+                "id": agent_id,
+                "label": meta["label"],
+                "icon": meta["icon"],
+                "status": hb["status"],
+                "last_run": hb["last_run"],
+                "elapsed_seconds": elapsed_s,
+                "ago": ago,
+                "result": hb["result"],
+            })
+        else:
+            result.append({
+                "id": agent_id,
+                "label": meta["label"],
+                "icon": meta["icon"],
+                "status": "unknown",
+                "last_run": None,
+                "elapsed_seconds": None,
+                "ago": "jamais",
+                "result": "—",
+            })
+
+    return result

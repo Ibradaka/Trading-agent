@@ -193,3 +193,5 @@ async def update_all_sentiments() -> None:
         await asyncio.gather(*batch, return_exceptions=True)
 
     logger.info("Sentiment update complete", count=len(tickers))
+    from app.services.redis_client import agent_heartbeat
+    await agent_heartbeat("sentiment", f"{len(tickers)} actifs")
