@@ -1,9 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type WatchlistSignalEntry, type AssetQuote, type Position } from "@/lib/api";
-import { useState } from "react";
-import { Plus, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Plus, Loader2, TrendingUp, TrendingDown, Minus, X, Search } from "lucide-react";
 import Link from "next/link";
 import { cn, signalLabel, scoreToColor, formatScore, formatAssetPrice } from "@/lib/utils";
 import { useSSE } from "@/lib/sse";
@@ -282,8 +282,72 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
   );
 }
 
+function AddAssetModal({ watchlistId, onClose }: { watchlistId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [ticker, setTicker] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const mutation = useMutation({
+    mutationFn: async (t: string) => {
+      await api.assets.validateAndAdd(t);
+      return api.watchlists.addAsset(watchlistId, t);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["watchlist-signals", watchlistId] });
+      onClose();
+    },
+    onError: (e: Error) => setError(e.message || "Ticker invalide ou déjà présent"),
+  });
+
+  const submit = () => {
+    const t = ticker.trim().toUpperCase();
+    if (!t) return;
+    setError(null);
+    mutation.mutate(t);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-80 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-slate-200">Ajouter un actif</h3>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+            <input
+              ref={inputRef}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500 transition-colors uppercase"
+              placeholder="NVDA, AAPL…"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+            />
+          </div>
+          <button
+            onClick={submit}
+            disabled={mutation.isPending || !ticker.trim()}
+            className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+          >
+            {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Ajouter"}
+          </button>
+        </div>
+        {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+        <p className="mt-2 text-xs text-slate-600">Ticker Yahoo Finance (ex: NVDA, MC.PA, ISLN.L)</p>
+      </div>
+    </div>
+  );
+}
+
 export function WatchlistPanel() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const { data: watchlists = [], isLoading } = useQuery({
     queryKey: ["watchlists"],
@@ -336,7 +400,11 @@ export function WatchlistPanel() {
             {" · "}Rafraîchi toutes les <span className="text-slate-400">{currentWl.refresh_interval_minutes} min</span>
           </div>
         )}
-        <button className="ml-auto p-2 text-slate-600 hover:text-slate-300 transition-colors" title="Ajouter un actif">
+        <button
+          className="ml-auto p-2 text-slate-600 hover:text-slate-300 transition-colors"
+          title="Ajouter un actif"
+          onClick={() => setShowAddModal(true)}
+        >
           <Plus className="w-4 h-4" />
         </button>
       </div>
@@ -351,6 +419,10 @@ export function WatchlistPanel() {
           />
         )}
       </div>
+
+      {showAddModal && currentId && (
+        <AddAssetModal watchlistId={currentId} onClose={() => setShowAddModal(false)} />
+      )}
     </div>
   );
 }
