@@ -369,6 +369,24 @@ async def filter_and_score_all() -> None:
 
     async def _process(ticker: str, asset_id: str) -> None:
         try:
+            # Charge le profil adaptatif de l'actif (calculé lors du dernier backtest)
+            from app.services.asset_profile import load_asset_profile
+            profile = await load_asset_profile(ticker)
+            adaptive = profile["params"]
+            min_fusion_score = adaptive["min_fusion_score"]
+            min_confidence   = adaptive["min_confidence"]
+            cooldown_hours   = adaptive["cooldown_hours"]
+
+            if profile["label"] != "unknown":
+                logger.debug(
+                    "Adaptive profile loaded",
+                    ticker=ticker,
+                    label=profile["label"],
+                    min_score=min_fusion_score,
+                    min_conf=min_confidence,
+                    cooldown_h=cooldown_hours,
+                )
+
             async with AsyncSessionLocal() as session:
                 df = await load_ohlc_df(session, asset_id)
                 patterns = await _load_recent_patterns(session, asset_id)
@@ -405,6 +423,19 @@ async def filter_and_score_all() -> None:
             # 3c. Signal Fusion Engine — décision déterministe backtestable
             fusion = compute_fusion_score(breakdown)
 
+            # Filtre adaptatif : seuil de score ajusté selon le profil de l'actif
+            if fusion["signal_type"] == "HOLD":
+                return
+            if fusion["score"] < min_fusion_score:
+                logger.debug(
+                    "Signal below adaptive threshold",
+                    ticker=ticker,
+                    score=fusion["score"],
+                    threshold=min_fusion_score,
+                    label=profile["label"],
+                )
+                return
+
             # 3d. Risk filters (utilise le fusion score pour cohérence)
             assessment = await assess_risk(
                 ticker=ticker,
@@ -435,6 +466,22 @@ async def filter_and_score_all() -> None:
                 has_fresh_macro=(macro_ctx.get("fed_rate") is not None),
             )
 
+            # Cap de confiance selon le profil de l'actif
+            from app.agents.confidence import apply_confidence_cap
+            max_conf_label = adaptive.get("max_confidence_label", "high")
+            confidence_ctx = apply_confidence_cap(confidence_ctx, max_conf_label)
+
+            # Filtre adaptatif : seuil de confiance ajusté selon le profil
+            if confidence_ctx["score"] / 100.0 < min_confidence:
+                logger.debug(
+                    "Signal below adaptive confidence",
+                    ticker=ticker,
+                    confidence=confidence_ctx["score"] / 100.0,
+                    threshold=min_confidence,
+                    label=profile["label"],
+                )
+                return
+
             # 3f. LLM explanation (couche d'interprétabilité, non décisionnaire)
             from app.services.llm import explain_signal
             llm_result = await explain_signal(
@@ -459,7 +506,7 @@ async def filter_and_score_all() -> None:
                 )
                 await session.commit()
 
-            await set_cooldown(ticker, hours=4)
+            await set_cooldown(ticker, hours=cooldown_hours)
 
             await publish(f"signal:updated:{ticker}", {
                 "ticker": ticker,

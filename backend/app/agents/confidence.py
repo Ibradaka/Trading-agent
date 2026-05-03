@@ -70,3 +70,24 @@ def compute_confidence(
     label = "high" if score >= 70 else ("medium" if score >= 45 else "low")
 
     return {"score": score, "label": label, "reasons": reasons}
+
+
+# Ordre hiérarchique des niveaux de confiance
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+_CONFIDENCE_SCORE_CAP = {"low": 44.9, "medium": 69.9, "high": 95.0}
+
+
+def apply_confidence_cap(confidence: dict, max_label: str) -> dict:
+    """
+    Plafonne le niveau de confiance selon le profil de l'actif.
+    Si le label calculé dépasse max_label, on ramène label ET score au cap.
+    """
+    if _CONFIDENCE_RANK.get(confidence["label"], 0) <= _CONFIDENCE_RANK.get(max_label, 2):
+        return confidence  # déjà sous le cap, rien à faire
+
+    capped_score = min(confidence["score"], _CONFIDENCE_SCORE_CAP[max_label])
+    return {
+        "score": capped_score,
+        "label": max_label,
+        "reasons": confidence["reasons"] + [f"confiance plafonnée à '{max_label}' (profil actif)"],
+    }
