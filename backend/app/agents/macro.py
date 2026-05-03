@@ -40,6 +40,44 @@ async def _fetch_fred(series_id: str) -> float | None:
     return None
 
 
+def _classify_regime(
+    fed_rate: float | None,
+    t10y2y: float | None,
+    t10yie: float | None,
+) -> tuple[str, str]:
+    """
+    Classifie le régime macro en 5 catégories.
+    Retourne (regime_name, macro_bias).
+
+    Régimes :
+    - recession_fear        : courbe fortement inversée → signal récession
+    - inflationary_risk_off : taux élevés + inflation élevée → risk-off
+    - inflationary_risk_on  : inflation modérée + politique monétaire supportive
+    - disinflation          : inflation en baisse + taux bas
+    - neutral               : pas de signal clair
+    """
+    if fed_rate is None and t10y2y is None:
+        return "neutral", "neutral"
+
+    # Courbe fortement inversée → peur de récession (signal le plus fort)
+    if t10y2y is not None and t10y2y < -0.5:
+        return "recession_fear", "bearish"
+
+    # Taux élevés + inflation attendue élevée → risk-off
+    if (fed_rate is not None and fed_rate >= 4.5) and (t10yie is not None and t10yie > 2.8):
+        return "inflationary_risk_off", "bearish"
+
+    # Inflation modérée + taux bas/moyens → risk-on inflationniste
+    if (t10yie is not None and 2.0 < t10yie <= 3.0) and (fed_rate is not None and fed_rate < 4.5):
+        return "inflationary_risk_on", "neutral"
+
+    # Désinflation : inflation basse + politique accommodante
+    if (t10yie is not None and t10yie < 2.0) and (fed_rate is not None and fed_rate < 3.5):
+        return "disinflation", "bullish"
+
+    return "neutral", "neutral"
+
+
 def _compute_score(
     fed_rate: float | None,
     t10y2y: float | None,
@@ -94,12 +132,31 @@ def _compute_score(
     return score, narrative
 
 
+_MACRO_DEFAULTS: dict = {
+    "score": 50.0,
+    "narrative": "",
+    "regime": "neutral",
+    "bias": "neutral",
+    "fed_rate": None,
+    "t10y2y": None,
+    "t10yie": None,
+}
+
+
 async def get_macro_score() -> tuple[float, str]:
-    """Returns (score 0-100, narrative). Falls back to (50, '') if no data."""
+    """Backward-compatible: returns (score 0-100, narrative)."""
     cached = await cache_get(_CACHE_KEY)
     if cached:
         return float(cached["score"]), cached.get("narrative", "")
     return 50.0, ""
+
+
+async def get_macro_context() -> dict:
+    """Returns full macro context dict including regime and bias. Falls back to defaults."""
+    cached = await cache_get(_CACHE_KEY)
+    if cached:
+        return cached
+    return _MACRO_DEFAULTS.copy()
 
 
 async def update_macro_context() -> None:
@@ -118,9 +175,12 @@ async def update_macro_context() -> None:
     t10yie = results[2] if isinstance(results[2], float) else None
 
     score, narrative = _compute_score(fed_rate, t10y2y, t10yie)
+    regime, bias = _classify_regime(fed_rate, t10y2y, t10yie)
     payload = {
         "score": score,
         "narrative": narrative,
+        "regime": regime,
+        "bias": bias,
         "fed_rate": fed_rate,
         "t10y2y": t10y2y,
         "t10yie": t10yie,
@@ -149,6 +209,8 @@ async def update_macro_context() -> None:
     logger.info(
         "Macro context updated",
         score=score,
+        regime=regime,
+        bias=bias,
         fed_rate=fed_rate,
         t10y2y=t10y2y,
         t10yie=t10yie,

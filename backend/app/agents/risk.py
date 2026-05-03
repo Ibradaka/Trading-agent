@@ -16,7 +16,7 @@ from app.agents.watchlist_manager import get_active_tickers
 from app.agents.technical import load_ohlc_df, compute_indicators
 from app.scoring.technical import compute_technical_score, compute_momentum_score
 from app.scoring.patterns import compute_pattern_score
-from app.scoring.composite import compute_composite_score
+from app.scoring.composite import compute_composite_score, compute_fusion_score
 
 logger = structlog.get_logger()
 
@@ -171,7 +171,7 @@ async def assess_risk(
     failed_list: list[str] = []
     reasons: list[str] = []
 
-    signal_type = "BUY" if composite_score >= 60 else ("SELL" if composite_score <= 40 else "HOLD")
+    signal_type = "BUY" if composite_score >= 65 else ("SELL" if composite_score <= 45 else "HOLD")
 
     # 1. Volume
     ok, msg = _volume_filter(indicators)
@@ -238,6 +238,7 @@ async def _write_signal(
     session: AsyncSession,
     asset_id: str,
     breakdown,
+    fusion: dict,
     confidence: float,
     patterns: list[dict],
     indicators: dict,
@@ -309,9 +310,9 @@ async def _write_signal(
             "id": signal_id,
             "asset_id": asset_id,
             "timestamp": now,
-            "signal_type": breakdown.signal_type,
-            "strength": breakdown.signal_strength,
-            "composite_score": breakdown.composite,
+            "signal_type": fusion["signal_type"],
+            "strength": fusion["signal_strength"],
+            "composite_score": fusion["score"],
             "technical_score": breakdown.technical,
             "pattern_score": breakdown.patterns,
             "sentiment_score": breakdown.sentiment,
@@ -383,12 +384,16 @@ async def filter_and_score_all() -> None:
             mom_score = compute_momentum_score(indicators)
             pat_score = compute_pattern_score(patterns)
 
-            # spec-003: real sentiment + macro scores (from Redis cache, 50 fallback)
+            # 3a. Scores contextuels depuis le cache Redis (défaut 50 si absent)
             from app.agents.sentiment import get_sentiment_score
-            from app.agents.macro import get_macro_score
-            sentiment_score, sentiment_narrative, _ = await get_sentiment_score(ticker)
-            macro_score, macro_narrative = await get_macro_score()
+            from app.agents.macro import get_macro_context
+            sentiment_score, sentiment_narrative, sentiment_themes = await get_sentiment_score(ticker)
+            macro_ctx = await get_macro_context()
+            macro_score = float(macro_ctx["score"])
+            macro_narrative = macro_ctx.get("narrative", "")
+            macro_regime = macro_ctx.get("regime", "neutral")
 
+            # 3b. Score composite existant (pour stockage et affichage des sous-scores)
             breakdown = compute_composite_score(
                 technical=tech_score,
                 patterns=pat_score,
@@ -397,10 +402,14 @@ async def filter_and_score_all() -> None:
                 sentiment=sentiment_score,
             )
 
+            # 3c. Signal Fusion Engine — décision déterministe backtestable
+            fusion = compute_fusion_score(breakdown)
+
+            # 3d. Risk filters (utilise le fusion score pour cohérence)
             assessment = await assess_risk(
                 ticker=ticker,
                 indicators=indicators,
-                composite_score=breakdown.composite,
+                composite_score=fusion["score"],
                 technical_score=tech_score,
                 pattern_score=pat_score,
                 momentum_score=mom_score,
@@ -411,27 +420,41 @@ async def filter_and_score_all() -> None:
                 logger.debug(
                     "Signal filtered",
                     ticker=ticker,
-                    score=breakdown.composite,
+                    fusion_score=fusion["score"],
                     failed=assessment.filters_failed,
                 )
                 return
 
-            # spec-003: LLM synthesis (enriches reasoning, falls back gracefully)
-            from app.services.llm import synthesize_signal
-            llm_result = await synthesize_signal(
+            # 3e. Confidence Engine
+            from app.agents.confidence import compute_confidence
+            confidence_ctx = compute_confidence(
+                tech_composite=fusion["technical_composite"],
+                sentiment_score=sentiment_score,
+                macro_score=macro_score,
+                has_fresh_sentiment=bool(sentiment_narrative),
+                has_fresh_macro=(macro_ctx.get("fed_rate") is not None),
+            )
+
+            # 3f. LLM explanation (couche d'interprétabilité, non décisionnaire)
+            from app.services.llm import explain_signal
+            llm_result = await explain_signal(
                 ticker=ticker,
                 asset_name=ticker,
+                fusion=fusion,
                 breakdown=breakdown,
                 indicators=indicators,
                 patterns=patterns,
                 sentiment_narrative=sentiment_narrative,
                 macro_narrative=macro_narrative,
+                macro_regime=macro_regime,
+                confidence=confidence_ctx,
             )
 
             async with AsyncSessionLocal() as session:
                 signal_id = await _write_signal(
-                    session, asset_id, breakdown,
-                    assessment.confidence, patterns, indicators,
+                    session, asset_id, breakdown, fusion,
+                    confidence_ctx["score"] / 100.0,  # normalise 0-1 pour la DB
+                    patterns, indicators,
                     llm_result=llm_result,
                 )
                 await session.commit()
@@ -440,19 +463,22 @@ async def filter_and_score_all() -> None:
 
             await publish(f"signal:updated:{ticker}", {
                 "ticker": ticker,
-                "signal_type": breakdown.signal_type,
-                "strength": breakdown.signal_strength,
-                "composite_score": breakdown.composite,
-                "confidence": assessment.confidence,
+                "signal_type": fusion["signal_type"],
+                "strength": fusion["signal_strength"],
+                "composite_score": fusion["score"],
+                "confidence": confidence_ctx["score"] / 100.0,
+                "confidence_label": confidence_ctx["label"],
+                "macro_regime": macro_regime,
                 "signal_id": signal_id,
             })
 
             logger.info(
                 "Signal written",
                 ticker=ticker,
-                signal=breakdown.signal_type,
-                score=breakdown.composite,
-                confidence=round(assessment.confidence, 2),
+                signal=fusion["signal_type"],
+                fusion_score=fusion["score"],
+                confidence_label=confidence_ctx["label"],
+                macro_regime=macro_regime,
             )
         except Exception:
             logger.exception("Signal scoring failed", ticker=ticker)

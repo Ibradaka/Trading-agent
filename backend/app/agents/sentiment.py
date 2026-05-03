@@ -21,6 +21,15 @@ logger = structlog.get_logger()
 
 _SENTIMENT_TTL = 15 * 60  # 15 min
 
+# Mots-clés macro qui justifient un appel LLM pour scoring précis
+_MACRO_TRIGGER_KEYWORDS = frozenset([
+    "fed", "fomc", "federal", "reserve", "rate", "hike", "cut", "pivot",
+    "cpi", "inflation", "deflation", "recession", "gdp", "stagflation",
+    "sanctions", "opec", "oil", "crisis", "default", "collapse", "bubble",
+    "quantitative", "taper", "powell", "lagarde", "ecb", "bce",
+    "unemployment", "payrolls", "yields", "treasury", "spread",
+])
+
 _POSITIVE_WORDS = frozenset([
     "upgrade", "buy", "outperform", "beat", "beats", "growth", "surge", "rally",
     "strong", "bullish", "positive", "raised", "exceeded", "record", "gain",
@@ -78,6 +87,12 @@ def _keyword_score(title: str) -> float:
     return (pos - neg) / (pos + neg)
 
 
+def _should_use_llm(titles: list[str]) -> bool:
+    """Retourne True si les titres contiennent un événement macro important."""
+    all_words = set(re.findall(r"\b\w+\b", " ".join(titles).lower()))
+    return bool(all_words & _MACRO_TRIGGER_KEYWORDS)
+
+
 async def get_sentiment_score(ticker: str) -> tuple[float, str, list[str]]:
     """
     Returns (score 0-100, narrative, themes) from Redis cache.
@@ -106,13 +121,17 @@ async def _compute_and_cache(ticker: str, asset_id: str) -> None:
     titles = [a["title"] for a in articles[:8]]
     keyword_scores = [_keyword_score(t) for t in titles]
 
-    llm_scores = await score_sentiment_batch(ticker, titles)
-
-    # Weighted average: 40% keyword, 60% LLM
-    final_scores = [
-        0.4 * kw + 0.6 * (llm_scores[i] if i < len(llm_scores) else kw)
-        for i, kw in enumerate(keyword_scores)
-    ]
+    # Appel LLM uniquement si événement macro détecté — réduit les coûts API
+    use_llm = _should_use_llm(titles)
+    if use_llm:
+        llm_scores = await score_sentiment_batch(ticker, titles)
+        final_scores = [
+            0.4 * kw + 0.6 * (llm_scores[i] if i < len(llm_scores) else kw)
+            for i, kw in enumerate(keyword_scores)
+        ]
+        logger.debug("Sentiment LLM triggered", ticker=ticker, reason="macro keywords detected")
+    else:
+        final_scores = keyword_scores
 
     avg = sum(final_scores) / len(final_scores)
     score = max(10.0, min(90.0, round(50.0 + avg * 30.0, 1)))

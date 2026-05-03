@@ -51,19 +51,24 @@ async def score_sentiment_batch(ticker: str, titles: list[str]) -> list[float]:
     return [0.0] * len(titles)
 
 
-async def synthesize_signal(
+async def explain_signal(
     ticker: str,
     asset_name: str,
+    fusion: dict,
     breakdown,
     indicators: dict,
     patterns: list[dict],
     sentiment_narrative: str = "",
     macro_narrative: str = "",
+    macro_regime: str = "neutral",
+    confidence: dict | None = None,
 ) -> dict | None:
     """
-    Generate rich French reasoning for a trading signal via GPT-4o-mini.
-    Returns dict with reasoning, invalidation_conditions, horizon, risks, llm_raw_output.
-    Returns None if OpenAI is unavailable or call fails.
+    Couche d'explication — le LLM ne décide pas, il explique une décision déjà prise.
+
+    La décision (signal_type, fusion_score) vient du Signal Fusion Engine déterministe.
+    Le LLM génère uniquement : reasoning, invalidation_conditions, horizon, risks.
+    Retourne None si OpenAI est indisponible (fallback déterministe dans risk.py).
     """
     if not settings.openai_api_key:
         return None
@@ -88,20 +93,22 @@ async def synthesize_signal(
             else "baissière" if all(v is not None for v in [close, ema20, ema50]) and close < ema20 < ema50
             else "neutre"
         )
+        conf_label = confidence["label"] if confidence else "medium"
+        conf_reasons = ", ".join(confidence["reasons"][:2]) if confidence else ""
 
         context = (
             f"Ticker: {ticker} ({asset_name})\n"
-            f"Signal: {breakdown.signal_type} {breakdown.signal_strength} — Score composite: {breakdown.composite:.0f}/100\n\n"
-            f"SCORES:\n"
-            f"- Technique (35%): {breakdown.technical:.0f}/100\n"
-            f"- Patterns (20%): {breakdown.patterns:.0f}/100\n"
-            f"- Momentum (20%): {breakdown.momentum:.0f}/100\n"
-            f"- Macro (15%): {breakdown.macro:.0f}/100\n"
-            f"- Sentiment (10%): {breakdown.sentiment:.0f}/100\n\n"
-            f"INDICATEURS:\n"
+            f"DÉCISION (déterministe) : {fusion['signal_type']} {fusion['signal_strength']}"
+            f" — Fusion score: {fusion['score']:.0f}/100 — Confiance: {conf_label}\n\n"
+            f"DÉCOMPOSITION DU SCORE DE FUSION :\n"
+            f"- Technique composite (50%): {fusion['technical_composite']:.0f}/100\n"
+            f"  → Technique {breakdown.technical:.0f} / Patterns {breakdown.patterns:.0f} / Momentum {breakdown.momentum:.0f}\n"
+            f"- Sentiment (25%): {breakdown.sentiment:.0f}/100\n"
+            f"- Macro (25%): {breakdown.macro:.0f}/100 — Régime: {macro_regime}\n\n"
+            f"INDICATEURS CLÉS :\n"
             f"- RSI: {rsi_str} | MACD histogram: {macd_dir}\n"
             f"- Tendance EMA: {ema_trend} | EMA20: {ema20_str} | EMA50: {ema50_str}\n\n"
-            f"PATTERNS:\n"
+            f"PATTERNS :\n"
             f"- Haussiers: {', '.join(bullish_pats) or 'aucun'}\n"
             f"- Baissiers: {', '.join(bearish_pats) or 'aucun'}\n"
         )
@@ -109,6 +116,8 @@ async def synthesize_signal(
             context += f"\nSENTIMENT: {sentiment_narrative}"
         if macro_narrative:
             context += f"\nMACRO: {macro_narrative}"
+        if conf_reasons:
+            context += f"\nCONFIANCE: {conf_reasons}"
 
         resp = await client.chat.completions.create(
             model=settings.openai_model,
@@ -116,17 +125,21 @@ async def synthesize_signal(
                 {
                     "role": "system",
                     "content": (
-                        "Tu es un analyste swing trading senior. Génère une analyse concise en français "
-                        "basée sur les données fournies. Sois direct et actionnable. "
+                        "Tu es un analyste swing trading senior. "
+                        "La décision d'achat/vente EST DÉJÀ PRISE de façon déterministe. "
+                        "Ton rôle est UNIQUEMENT d'expliquer pourquoi cette décision est justifiée "
+                        "et d'identifier les risques. Sois factuel, concis, en français. "
                         "Réponds UNIQUEMENT en JSON valide avec les champs: "
-                        "reasoning (string, 2-3 phrases), invalidation_conditions (string), "
-                        "horizon (string), risks (array of strings, max 3)."
+                        "reasoning (string, 2-3 phrases max), "
+                        "invalidation_conditions (string, 1 phrase), "
+                        "horizon (string), "
+                        "risks (array de strings, max 3)."
                     ),
                 },
                 {"role": "user", "content": context},
             ],
             max_tokens=500,
-            temperature=0.3,
+            temperature=0.2,
             response_format={"type": "json_object"},
         )
 
@@ -139,7 +152,7 @@ async def synthesize_signal(
             "llm_raw_output": result,
         }
     except Exception as e:
-        logger.warning("LLM signal synthesis failed", ticker=ticker, error=str(e))
+        logger.warning("LLM explain_signal failed", ticker=ticker, error=str(e))
         return None
 
 
