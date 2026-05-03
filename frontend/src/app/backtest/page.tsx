@@ -3,6 +3,15 @@
 import { useState } from "react";
 import { api, BacktestResult, BacktestDiagnostics } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+} from "recharts";
 
 function KpiCard({ label, value, sub, highlight }: { label: string; value: string | null; sub?: string; highlight?: "good" | "bad" | "neutral" }) {
   const colors = { good: "text-emerald-400", bad: "text-red-400", neutral: "text-slate-100" };
@@ -74,6 +83,220 @@ function BenchmarkRow({ label, value, systemValue }: { label: string; value: num
           {diff > 0 ? "▲" : "▼"} {Math.abs(diff).toFixed(1)}%
         </span>
       </div>
+    </div>
+  );
+}
+
+interface SimTrade {
+  date: string;
+  type: "BUY" | "SELL";
+  price: number;
+  returnPct: number;
+  capitalBefore: number;
+  capitalAfter: number;
+  gain: number;
+  won: boolean;
+}
+
+interface SimResult {
+  trades: SimTrade[];
+  curve: { label: string; capital: number }[];
+  initialCapital: number;
+  finalCapital: number;
+  totalGain: number;
+  totalGainPct: number;
+  nWon: number;
+  nLost: number;
+  bestTrade: SimTrade | null;
+  worstTrade: SimTrade | null;
+  maxDrawdown: number;
+}
+
+function computeSimulation(result: BacktestResult, initialCapital = 1000): SimResult {
+  const horizon = result.metrics.horizon_days;
+  const returnKey = horizon <= 5 ? "return_5d" : horizon <= 10 ? "return_10d" : "return_20d";
+
+  const validSignals = result.signals.filter((s) => {
+    const r = s[returnKey as keyof typeof s] as number | null;
+    return r !== null;
+  });
+
+  if (validSignals.length === 0) {
+    return {
+      trades: [],
+      curve: [{ label: "Départ", capital: initialCapital }],
+      initialCapital,
+      finalCapital: initialCapital,
+      totalGain: 0,
+      totalGainPct: 0,
+      nWon: 0,
+      nLost: 0,
+      bestTrade: null,
+      worstTrade: null,
+      maxDrawdown: 0,
+    };
+  }
+
+  const positionSize = initialCapital / validSignals.length;
+  let capital = initialCapital;
+  const trades: SimTrade[] = [];
+  const curve: { label: string; capital: number }[] = [{ label: "Départ", capital: initialCapital }];
+  let peak = initialCapital;
+  let maxDrawdown = 0;
+
+  for (const sig of validSignals) {
+    const returnPct = (sig[returnKey as keyof typeof sig] as number) ?? 0;
+    const adjustedReturn = sig.signal_type === "SELL" ? -returnPct : returnPct;
+    const capitalBefore = capital;
+    const gain = positionSize * (adjustedReturn / 100);
+    capital = capital + gain;
+    const won = adjustedReturn > 0;
+
+    const trade: SimTrade = {
+      date: sig.date,
+      type: sig.signal_type as "BUY" | "SELL",
+      price: sig.price,
+      returnPct: adjustedReturn,
+      capitalBefore,
+      capitalAfter: capital,
+      gain,
+      won,
+    };
+    trades.push(trade);
+
+    const label = new Date(sig.date).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
+    curve.push({ label, capital: Math.round(capital * 100) / 100 });
+
+    if (capital > peak) peak = capital;
+    const dd = ((peak - capital) / peak) * 100;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+
+  const sortedByGain = [...trades].sort((a, b) => b.gain - a.gain);
+
+  return {
+    trades,
+    curve,
+    initialCapital,
+    finalCapital: capital,
+    totalGain: capital - initialCapital,
+    totalGainPct: ((capital - initialCapital) / initialCapital) * 100,
+    nWon: trades.filter((t) => t.won).length,
+    nLost: trades.filter((t) => !t.won).length,
+    bestTrade: sortedByGain[0] ?? null,
+    worstTrade: sortedByGain[sortedByGain.length - 1] ?? null,
+    maxDrawdown,
+  };
+}
+
+function SimulationPanel({ result }: { result: BacktestResult }) {
+  const sim = computeSimulation(result);
+  const positive = sim.totalGain >= 0;
+
+  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) => {
+    if (!active || !payload?.length) return null;
+    const val = payload[0].value;
+    const diff = val - sim.initialCapital;
+    const pct = ((diff / sim.initialCapital) * 100).toFixed(1);
+    return (
+      <div className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs">
+        <p className="text-slate-400 mb-0.5">{label}</p>
+        <p className="font-semibold text-slate-100">{val.toFixed(0)} €</p>
+        <p className={cn("font-medium", diff >= 0 ? "text-emerald-400" : "text-red-400")}>
+          {diff >= 0 ? "+" : ""}{diff.toFixed(0)} € ({diff >= 0 ? "+" : ""}{pct}%)
+        </p>
+      </div>
+    );
+  };
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-200">Simulation 1 000 €</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {sim.trades.length} trades · {sim.initialCapital / sim.trades.length > 0 ? `${(sim.initialCapital / sim.trades.length).toFixed(0)} € par position` : "—"}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className={cn("text-3xl font-bold font-mono", positive ? "text-emerald-400" : "text-red-400")}>
+            {sim.finalCapital.toFixed(0)} €
+          </p>
+          <p className={cn("text-sm font-medium font-mono", positive ? "text-emerald-400/80" : "text-red-400/80")}>
+            {positive ? "+" : ""}{sim.totalGain.toFixed(0)} € ({positive ? "+" : ""}{sim.totalGainPct.toFixed(1)}%)
+          </p>
+        </div>
+      </div>
+
+      {/* Courbe d'évolution */}
+      <div className="h-44">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={sim.curve} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+            <defs>
+              <linearGradient id="capitalGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={positive ? "#10b981" : "#ef4444"} stopOpacity={0.25} />
+                <stop offset="95%" stopColor={positive ? "#10b981" : "#ef4444"} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis dataKey="label" tick={{ fill: "#475569", fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+            <YAxis tick={{ fill: "#475569", fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}€`} width={52} />
+            <Tooltip content={<CustomTooltip />} />
+            <ReferenceLine y={sim.initialCapital} stroke="#334155" strokeDasharray="4 3" />
+            <Area
+              type="monotone"
+              dataKey="capital"
+              stroke={positive ? "#10b981" : "#ef4444"}
+              strokeWidth={2}
+              fill="url(#capitalGrad)"
+              dot={false}
+              isAnimationActive={false}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Stats récapitulatives */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-slate-800/50 rounded-lg p-3">
+          <p className="text-xs text-slate-500 mb-1">Trades gagnants</p>
+          <p className="text-lg font-semibold text-emerald-400">{sim.nWon}</p>
+          <p className="text-xs text-slate-600">{sim.trades.length > 0 ? `${((sim.nWon / sim.trades.length) * 100).toFixed(0)}% de réussite` : "—"}</p>
+        </div>
+        <div className="bg-slate-800/50 rounded-lg p-3">
+          <p className="text-xs text-slate-500 mb-1">Trades perdants</p>
+          <p className="text-lg font-semibold text-red-400">{sim.nLost}</p>
+          <p className="text-xs text-slate-600">{sim.trades.length > 0 ? `${((sim.nLost / sim.trades.length) * 100).toFixed(0)}% des trades` : "—"}</p>
+        </div>
+        <div className="bg-slate-800/50 rounded-lg p-3">
+          <p className="text-xs text-slate-500 mb-1">Meilleur trade</p>
+          <p className="text-lg font-semibold text-emerald-400">
+            {sim.bestTrade ? `+${sim.bestTrade.gain.toFixed(0)} €` : "—"}
+          </p>
+          <p className="text-xs text-slate-600">
+            {sim.bestTrade ? `${sim.bestTrade.returnPct > 0 ? "+" : ""}${sim.bestTrade.returnPct.toFixed(1)}% · ${new Date(sim.bestTrade.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}` : ""}
+          </p>
+        </div>
+        <div className="bg-slate-800/50 rounded-lg p-3">
+          <p className="text-xs text-slate-500 mb-1">Pire trade</p>
+          <p className="text-lg font-semibold text-red-400">
+            {sim.worstTrade ? `${sim.worstTrade.gain.toFixed(0)} €` : "—"}
+          </p>
+          <p className="text-xs text-slate-600">
+            {sim.worstTrade ? `${sim.worstTrade.returnPct.toFixed(1)}% · ${new Date(sim.worstTrade.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}` : ""}
+          </p>
+        </div>
+      </div>
+
+      {sim.maxDrawdown > 0 && (
+        <div className="flex items-center gap-2 text-xs text-slate-500 border-t border-slate-800 pt-3">
+          <span className="text-slate-600">Drawdown max :</span>
+          <span className={cn("font-medium", sim.maxDrawdown > 20 ? "text-red-400" : sim.maxDrawdown > 10 ? "text-amber-400" : "text-slate-400")}>
+            -{sim.maxDrawdown.toFixed(1)}%
+          </span>
+          <span className="text-slate-700">·</span>
+          <span className="text-slate-600">Soit -{((sim.maxDrawdown / 100) * sim.initialCapital).toFixed(0)} € au pire moment</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -205,6 +428,9 @@ export default function BacktestPage() {
               highlight={m.cumulative_return_pct != null ? (m.cumulative_return_pct > 0 ? "good" : "bad") : "neutral"}
             />
           </div>
+
+          {/* Simulation 1 000 € */}
+          <SimulationPanel result={result} />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Benchmarks */}
