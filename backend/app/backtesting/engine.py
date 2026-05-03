@@ -7,7 +7,6 @@ import asyncio
 import structlog
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 from app.services.yfinance_session import get_yf_session
 from app.scoring.technical import compute_technical_score, compute_momentum_score
@@ -21,19 +20,42 @@ _MIN_HISTORY = 52   # bougies minimum avant de générer un signal
 _COOLDOWN_DAYS = 4  # jours minimum entre deux signaux (cohérent avec risk.py)
 
 
+_YF_CHART_URL = (
+    "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+    "?interval=1d&range={period}"
+)
+
+
 def _fetch_history(ticker: str, period: str = "5y") -> pd.DataFrame:
-    """Fetch historique OHLC depuis yfinance (synchrone)."""
+    """Fetch historique OHLC via curl_cffi (contourne le blocage datacenter)."""
     try:
-        df = yf.Ticker(ticker).history(
-            period=period, interval="1d", auto_adjust=True
-        )
-        if df.empty:
-            return df
-        df.index = pd.to_datetime(df.index, utc=True)
-        df.columns = [c.lower() for c in df.columns]
-        return df[["open", "high", "low", "close", "volume"]]
+        session = get_yf_session()
+        r = session.get(_YF_CHART_URL.format(ticker=ticker, period=period), timeout=30)
+        data = r.json()
+        result = (data.get("chart", {}).get("result") or [None])[0]
+        if not result:
+            return pd.DataFrame()
+
+        timestamps = result.get("timestamp", [])
+        ohlcv = result.get("indicators", {}).get("quote", [{}])[0]
+        adjclose = result.get("indicators", {}).get("adjclose", [{}])[0].get("adjclose", [])
+
+        if not timestamps:
+            return pd.DataFrame()
+
+        closes = adjclose if adjclose else ohlcv.get("close", [])
+        df = pd.DataFrame({
+            "open": ohlcv.get("open", []),
+            "high": ohlcv.get("high", []),
+            "low": ohlcv.get("low", []),
+            "close": closes,
+            "volume": ohlcv.get("volume", []),
+        }, index=pd.to_datetime(timestamps, unit="s", utc=True))
+
+        df = df.dropna(subset=["close"])
+        return df
     except Exception as e:
-        logger.warning("yfinance fetch failed", ticker=ticker, error=str(e))
+        logger.warning("yfinance curl fetch failed", ticker=ticker, error=str(e))
         return pd.DataFrame()
 
 
