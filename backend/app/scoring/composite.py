@@ -72,14 +72,14 @@ def compute_composite_score(
     )
 
 
-def compute_fusion_score(breakdown: ScoreBreakdown) -> dict:
+def compute_fusion_score(breakdown: ScoreBreakdown, buy_threshold: float = 60.0, sell_threshold: float = 42.0) -> dict:
     """
     Signal Fusion Engine — décision déterministe et backtestable.
 
     Formule : 0.50 * technical_composite + 0.25 * sentiment + 0.25 * macro
     où technical_composite = agrégat normalisé de technical/patterns/momentum (75% du composite).
 
-    Seuils : BUY > 65, SELL < 45, HOLD entre les deux.
+    Seuils configurables depuis la page Configuration.
     """
     # Normalise les 3 composantes techniques (35+20+20 = 75%) vers 0-100
     tech_composite = round(
@@ -96,12 +96,12 @@ def compute_fusion_score(breakdown: ScoreBreakdown) -> dict:
     )
     score = max(0.0, min(100.0, score))
 
-    if score > 60:
+    if score > buy_threshold:
         signal_type = "BUY"
-        signal_strength = "strong" if score > 72 else "weak"
-    elif score < 42:
+        signal_strength = "strong" if score > buy_threshold + 12 else "weak"
+    elif score < sell_threshold:
         signal_type = "SELL"
-        signal_strength = "strong" if score < 28 else "weak"
+        signal_strength = "strong" if score < sell_threshold - 14 else "weak"
     else:
         signal_type = "HOLD"
         signal_strength = "weak"

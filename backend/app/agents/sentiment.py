@@ -19,7 +19,7 @@ from app.agents.watchlist_manager import get_active_tickers
 
 logger = structlog.get_logger()
 
-_SENTIMENT_TTL = 15 * 60  # 15 min
+_SENTIMENT_TTL = 4 * 3600  # 4h — survit hors heures de marché
 
 # Mots-clés macro qui justifient un appel LLM pour scoring précis
 _MACRO_TRIGGER_KEYWORDS = frozenset([

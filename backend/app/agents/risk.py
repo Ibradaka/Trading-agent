@@ -365,7 +365,15 @@ async def filter_and_score_all() -> None:
     if not tickers:
         return
 
-    logger.info("Scoring signals", count=len(tickers))
+    # Charge les seuils depuis la configuration Redis
+    from app.routers.system import get_settings
+    cfg = await get_settings()
+    global_buy_threshold  = float(cfg.get("buy_threshold", 60.0))
+    global_sell_threshold = float(cfg.get("sell_threshold", 50.0)) * 0.84  # UI: 50 → moteur: ~42
+    global_min_confidence = float(cfg.get("min_confidence", 0.40))
+    global_cooldown_hours = int(cfg.get("cooldown_minutes", 240)) // 60
+
+    logger.info("Scoring signals", count=len(tickers), buy_thr=global_buy_threshold, sell_thr=round(global_sell_threshold, 1))
 
     async def _process(ticker: str, asset_id: str) -> None:
         try:
@@ -421,7 +429,7 @@ async def filter_and_score_all() -> None:
             )
 
             # 3c. Signal Fusion Engine — décision déterministe backtestable
-            fusion = compute_fusion_score(breakdown)
+            fusion = compute_fusion_score(breakdown, buy_threshold=global_buy_threshold, sell_threshold=global_sell_threshold)
 
             # Toujours cacher le score courant pour l'UI (même si HOLD)
             await cache_set(f"signal:{ticker.upper()}", {
@@ -491,13 +499,14 @@ async def filter_and_score_all() -> None:
             max_conf_label = adaptive.get("max_confidence_label", "high")
             confidence_ctx = apply_confidence_cap(confidence_ctx, max_conf_label)
 
-            # Filtre adaptatif : seuil de confiance ajusté selon le profil
-            if confidence_ctx["score"] / 100.0 < min_confidence:
+            # Filtre adaptatif : seuil de confiance (max entre profil et config globale)
+            effective_min_confidence = max(min_confidence, global_min_confidence)
+            if confidence_ctx["score"] / 100.0 < effective_min_confidence:
                 logger.debug(
                     "Signal below adaptive confidence",
                     ticker=ticker,
                     confidence=confidence_ctx["score"] / 100.0,
-                    threshold=min_confidence,
+                    threshold=effective_min_confidence,
                     label=profile["label"],
                 )
                 return
