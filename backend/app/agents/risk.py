@@ -439,7 +439,7 @@ async def filter_and_score_all() -> None:
                 "confidence_label": None,
                 "asset_label": profile["label"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-            }, 15 * 60)
+            }, 4 * 3600)
 
             # Filtre adaptatif : seuil de score ajusté selon le profil de l'actif
             if fusion["signal_type"] == "HOLD":

@@ -66,6 +66,21 @@ async def _run_macro_update() -> None:
         logger.exception("Macro update failed")
 
 
+async def _run_score_refresh_offhours() -> None:
+    """Rafraîchit le cache signal Redis hors heures de marché (données DB existantes).
+    Évite que les scores disparaissent overnight."""
+    if is_market_open():
+        return  # Le pipeline principal s'en charge
+    try:
+        from app.agents.macro import update_macro_context
+        from app.agents.risk import filter_and_score_all
+        await update_macro_context()
+        await filter_and_score_all()
+        logger.debug("Off-hours score cache refreshed")
+    except Exception:
+        logger.exception("Off-hours score refresh failed")
+
+
 async def _run_outcome_tracking() -> None:
     """Vérifie l'accuracy des signaux à J+5, J+10, J+20 (quotidien)."""
     try:
@@ -119,6 +134,14 @@ async def start_scheduler() -> None:
         replace_existing=True,
         max_instances=1,
         next_run_time=datetime.now(timezone.utc),  # Run immediately at startup
+    )
+
+    _scheduler.add_job(
+        _run_score_refresh_offhours,
+        trigger=IntervalTrigger(hours=2),
+        id="score_refresh_offhours",
+        replace_existing=True,
+        max_instances=1,
     )
 
     _scheduler.add_job(
