@@ -72,7 +72,7 @@ async def _fix_asset_names() -> None:
     from app.database import AsyncSessionLocal
     from app.models.db import Asset
     from sqlalchemy import select
-    from app.routers.assets import _fetch_ticker_info
+    from app.services.yfinance_session import yf_chart
 
     try:
         async with AsyncSessionLocal() as session:
@@ -83,16 +83,16 @@ async def _fix_asset_names() -> None:
                 if asset.name and asset.name != asset.ticker:
                     continue
                 try:
-                    info = await asyncio.to_thread(_fetch_ticker_info, asset.ticker)
-                    name = info.get("longName") or info.get("shortName")
+                    meta = await asyncio.to_thread(yf_chart, asset.ticker)
+                    name = meta.get("longName") or meta.get("shortName")
                     if name and name != asset.ticker:
                         asset.name = name
                         updated += 1
+                        logger.info("Asset name fixed", ticker=asset.ticker, name=name)
                 except Exception:
                     pass
             await session.commit()
-        if updated:
-            logger.info("Asset names updated", count=updated)
+        logger.info("Asset names update complete", updated=updated)
     except Exception:
         logger.exception("Fix asset names failed")
 
