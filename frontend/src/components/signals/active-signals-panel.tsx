@@ -16,8 +16,8 @@ function timeAgo(ts: string): string {
 
 export function ActiveSignalsPanel() {
   const { data: signals = [], isLoading } = useQuery({
-    queryKey: ["signals-recent"],
-    queryFn: () => api.signals.recent(5),
+    queryKey: ["signals-active"],
+    queryFn: api.signals.active,
     refetchInterval: 60_000,
   });
 
