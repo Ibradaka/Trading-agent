@@ -96,12 +96,12 @@ def compute_fusion_score(breakdown: ScoreBreakdown) -> dict:
     )
     score = max(0.0, min(100.0, score))
 
-    if score > 65:
+    if score > 60:
         signal_type = "BUY"
-        signal_strength = "strong" if score > 75 else "weak"
-    elif score < 45:
+        signal_strength = "strong" if score > 72 else "weak"
+    elif score < 42:
         signal_type = "SELL"
-        signal_strength = "strong" if score < 25 else "weak"
+        signal_strength = "strong" if score < 28 else "weak"
     else:
         signal_type = "HOLD"
         signal_strength = "weak"
