@@ -200,7 +200,7 @@ function AssetCard({
       {/* Lien transparent sur toute la card */}
       <Link href={`/asset/${ticker}`} className="absolute inset-0 rounded-xl z-0" />
 
-      <div className="relative z-10 flex items-center gap-4 px-4 py-3.5">
+      <div className="relative z-10 flex items-center gap-3 px-4 py-2.5">
 
         {/* Colonne 1 : Ticker + nom */}
         <div className="w-28 flex-shrink-0">
@@ -278,20 +278,20 @@ function AssetCard({
                   ) : null;
                 })()}
               </div>
-              <div className={cn("px-3 py-2 rounded-lg border text-center min-w-[90px]", cfg.badge)}>
+              <div className={cn("px-2.5 py-1.5 rounded-lg border text-center min-w-[90px]", cfg.badge)}>
                 <p className="text-xs font-bold leading-tight tracking-wide">{label}</p>
-                <p className="text-[10px] mt-0.5 opacity-80">
+                <p className="text-[10px] opacity-80">
                   {signal.confidence != null ? `${Math.round(signal.confidence * 100)}% confiance` : "—"}
                 </p>
-                <p className="text-[9px] mt-0.5 opacity-50">{fmtAgo(signal.timestamp)}</p>
+                <p className="text-[9px] opacity-50">{fmtAgo(signal.timestamp)}</p>
               </div>
             </>
           ) : (
             <>
               <ScoreArc score={50} />
-              <div className="px-3 py-2 rounded-lg border border-slate-700/50 bg-slate-800/30 text-center min-w-[90px]">
+              <div className="px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/30 text-center min-w-[90px]">
                 <p className="text-xs text-slate-500 font-medium">En attente</p>
-                <p className="text-[9px] text-slate-600 mt-0.5">Prochain cycle</p>
+                <p className="text-[9px] text-slate-600">Prochain cycle</p>
               </div>
             </>
           )}
@@ -378,7 +378,7 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
   });
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {sorted.map((entry) => (
         <AssetCard
           key={entry.ticker}
