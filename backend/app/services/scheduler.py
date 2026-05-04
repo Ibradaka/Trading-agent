@@ -66,6 +66,37 @@ async def _run_macro_update() -> None:
         logger.exception("Macro update failed")
 
 
+async def _fix_asset_names() -> None:
+    """Met à jour les noms d'actifs qui sont identiques au ticker (données manquantes à la création)."""
+    import asyncio
+    from app.database import AsyncSessionLocal
+    from app.models.db import Asset
+    from sqlalchemy import select
+    from app.routers.assets import _fetch_ticker_info
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Asset))
+            assets = result.scalars().all()
+            updated = 0
+            for asset in assets:
+                if asset.name and asset.name != asset.ticker:
+                    continue
+                try:
+                    info = await asyncio.to_thread(_fetch_ticker_info, asset.ticker)
+                    name = info.get("longName") or info.get("shortName")
+                    if name and name != asset.ticker:
+                        asset.name = name
+                        updated += 1
+                except Exception:
+                    pass
+            await session.commit()
+        if updated:
+            logger.info("Asset names updated", count=updated)
+    except Exception:
+        logger.exception("Fix asset names failed")
+
+
 async def _run_backtest_all() -> None:
     """Lance le backtest sur tous les actifs actifs pour calculer leur profil (label).
     Tourne au démarrage et chaque dimanche à 06h00."""
@@ -141,6 +172,15 @@ async def _run_flush_pending() -> None:
 
 async def start_scheduler() -> None:
     refresh_min = settings.default_refresh_minutes
+
+    _scheduler.add_job(
+        _fix_asset_names,
+        trigger=CronTrigger(day_of_week="sun", hour=5, minute=0, timezone="Europe/Paris"),
+        id="fix_asset_names",
+        replace_existing=True,
+        max_instances=1,
+        next_run_time=datetime.now(timezone.utc),  # Run immediately at startup
+    )
 
     _scheduler.add_job(
         _run_market_data_pipeline,
