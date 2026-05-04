@@ -71,28 +71,38 @@ async def _fix_asset_names() -> None:
     import asyncio
     from app.database import AsyncSessionLocal
     from app.models.db import Asset
-    from sqlalchemy import select
+    from sqlalchemy import select, update
     from app.services.yfinance_session import yf_chart
 
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(Asset))
             assets = result.scalars().all()
-            updated = 0
-            for asset in assets:
-                if asset.name and asset.name != asset.ticker:
-                    continue
-                try:
-                    meta = await asyncio.to_thread(yf_chart, asset.ticker)
-                    name = meta.get("longName") or meta.get("shortName")
-                    if name and name != asset.ticker:
-                        asset.name = name
-                        updated += 1
-                        logger.info("Asset name fixed", ticker=asset.ticker, name=name)
-                except Exception:
-                    pass
-            await session.commit()
-        logger.info("Asset names update complete", updated=updated)
+
+        # Fetch names hors session (appels réseau)
+        to_update: list[tuple[str, str]] = []
+        for asset in assets:
+            if asset.name and asset.name != asset.ticker:
+                continue
+            try:
+                meta = await asyncio.to_thread(yf_chart, asset.ticker)
+                name = meta.get("longName") or meta.get("shortName")
+                if name and name != asset.ticker:
+                    to_update.append((asset.ticker, name))
+                    logger.info("Asset name fetched", ticker=asset.ticker, name=name)
+            except Exception:
+                pass
+
+        # Update en DB
+        if to_update:
+            async with AsyncSessionLocal() as session:
+                for ticker, name in to_update:
+                    await session.execute(
+                        update(Asset).where(Asset.ticker == ticker).values(name=name)
+                    )
+                await session.commit()
+
+        logger.info("Asset names update complete", updated=len(to_update))
     except Exception:
         logger.exception("Fix asset names failed")
 
