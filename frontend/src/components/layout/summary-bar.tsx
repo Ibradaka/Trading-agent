@@ -6,11 +6,23 @@ import { api, AgentStatus } from "@/lib/api";
 import { TrendingUp, TrendingDown, Activity, ShieldAlert, BellOff, WifiOff, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Max freshness threshold per agent (seconds) — aligned with their actual run cycles
+const AGENT_MAX_AGE: Record<string, number> = {
+  market_data: 45 * 60,   // 15min cycle → ok if < 45min
+  technical:   45 * 60,
+  patterns:    45 * 60,
+  risk_score:  45 * 60,
+  llm:         45 * 60,
+  sentiment:   5 * 3600,  // 4h cycle → ok if < 5h
+  macro:       7 * 3600,  // 6h cycle → ok if < 7h
+};
+
 function AgentDot({ agent }: { agent: AgentStatus }) {
   const [open, setOpen] = useState(false);
 
+  const maxAge = AGENT_MAX_AGE[agent.id] ?? 1800;
   const dotColor =
-    agent.status === "ok" && agent.elapsed_seconds !== null && agent.elapsed_seconds < 1800
+    agent.status === "ok" && agent.elapsed_seconds !== null && agent.elapsed_seconds < maxAge
       ? "bg-emerald-500"
       : agent.status === "error"
       ? "bg-red-500"
