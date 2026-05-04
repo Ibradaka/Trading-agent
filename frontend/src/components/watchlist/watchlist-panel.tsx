@@ -1,221 +1,301 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type WatchlistSignalEntry, type AssetQuote, type Position } from "@/lib/api";
+import { api, type WatchlistSignalEntry, type AssetQuote, type Position, type AgentStatus } from "@/lib/api";
 import { useState, useRef, useEffect } from "react";
-import { Plus, Loader2, TrendingUp, TrendingDown, Minus, X, Search } from "lucide-react";
+import { Plus, Loader2, TrendingUp, TrendingDown, X, Search } from "lucide-react";
 import Link from "next/link";
-import { cn, signalLabel, scoreToColor, formatScore, formatAssetPrice } from "@/lib/utils";
+import { cn, signalLabel, formatAssetPrice } from "@/lib/utils";
 import { useSSE } from "@/lib/sse";
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
+import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
 
-function SignalBadge({ type, strength }: { type: string; strength: string }) {
-  const label = signalLabel(type, strength);
-  const classes: Record<string, string> = {
-    "ACHAT FORT": "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",
-    "ACHAT": "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20",
-    "NEUTRE": "bg-slate-500/10 text-slate-400 border border-slate-500/30",
-    "VENTE": "bg-red-500/10 text-red-300 border border-red-500/20",
-    "VENTE FORTE": "bg-red-500/20 text-red-400 border border-red-500/30",
-  };
-  return (
-    <span className={cn("text-xs font-medium px-2 py-0.5 rounded", classes[label] ?? classes["NEUTRE"])}>
-      {label}
-    </span>
-  );
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function fmtAgo(iso: string | undefined): string {
+  if (!iso) return "";
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return "à l'instant";
+  if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
+  return `il y a ${Math.floor(diff / 86400)} j`;
 }
 
+const SIGNAL_CONFIG: Record<string, { border: string; bg: string; badge: string; text: string; dot: string }> = {
+  "ACHAT FORT": {
+    border: "border-l-emerald-500",
+    bg: "bg-emerald-500/5",
+    badge: "bg-emerald-500/20 border-emerald-500/40 text-emerald-300",
+    text: "text-emerald-400",
+    dot: "bg-emerald-500",
+  },
+  "ACHAT": {
+    border: "border-l-emerald-400/60",
+    bg: "bg-emerald-500/3",
+    badge: "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
+    text: "text-emerald-400",
+    dot: "bg-emerald-400",
+  },
+  "NEUTRE": {
+    border: "border-l-slate-600",
+    bg: "",
+    badge: "bg-slate-700/50 border-slate-600/50 text-slate-400",
+    text: "text-slate-400",
+    dot: "bg-slate-500",
+  },
+  "VENTE": {
+    border: "border-l-red-400/60",
+    bg: "bg-red-500/3",
+    badge: "bg-red-500/10 border-red-500/20 text-red-400",
+    text: "text-red-400",
+    dot: "bg-red-400",
+  },
+  "VENTE FORTE": {
+    border: "border-l-red-500",
+    bg: "bg-red-500/5",
+    badge: "bg-red-500/20 border-red-500/40 text-red-300",
+    text: "text-red-400",
+    dot: "bg-red-500",
+  },
+};
+
+// ─── Sparkline ───────────────────────────────────────────────────────────────
+
 function Sparkline({ data, positive }: { data: { v: number }[]; positive: boolean }) {
-  const color = positive ? "#10b981" : "#ef4444";
   return (
-    <ResponsiveContainer width={80} height={32}>
+    <ResponsiveContainer width={72} height={28}>
       <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-        <Line
-          type="monotone"
-          dataKey="v"
-          stroke={color}
-          strokeWidth={1.5}
-          dot={false}
-          isAnimationActive={false}
-        />
-        <Tooltip
-          content={() => null}
-          cursor={false}
-        />
+        <Line type="monotone" dataKey="v" stroke={positive ? "#10b981" : "#ef4444"} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+        <Tooltip content={() => null} cursor={false} />
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-function PriceCell({ ticker }: { ticker: string }) {
-  const { data: quote, isLoading } = useQuery<AssetQuote>({
+// ─── Score arc SVG ───────────────────────────────────────────────────────────
+
+function ScoreArc({ score }: { score: number }) {
+  const r = 18;
+  const circ = Math.PI * r; // demi-cercle
+  const pct = Math.max(0, Math.min(100, score)) / 100;
+  const dash = pct * circ;
+  const color = score >= 65 ? "#10b981" : score >= 50 ? "#f59e0b" : score >= 40 ? "#64748b" : "#ef4444";
+
+  return (
+    <svg width={44} height={26} viewBox="0 0 44 26">
+      {/* Track */}
+      <path
+        d="M 4 24 A 18 18 0 0 1 40 24"
+        fill="none" stroke="#1e293b" strokeWidth={4} strokeLinecap="round"
+      />
+      {/* Fill */}
+      <path
+        d="M 4 24 A 18 18 0 0 1 40 24"
+        fill="none" stroke={color} strokeWidth={4} strokeLinecap="round"
+        strokeDasharray={`${dash} ${circ}`}
+        style={{ transition: "stroke-dasharray 0.5s ease" }}
+      />
+      <text x="22" y="20" textAnchor="middle" fontSize="9" fontWeight="700" fill={color} fontFamily="monospace">
+        {Math.round(score)}
+      </text>
+    </svg>
+  );
+}
+
+// ─── Agents dots ─────────────────────────────────────────────────────────────
+
+const AGENT_KEYS = ["market_data", "technical", "patterns", "sentiment", "macro", "risk_score", "llm"];
+
+function AgentsDots({ agents }: { agents: AgentStatus[] }) {
+  const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
+  const ok = AGENT_KEYS.filter((k) => {
+    const a = agentMap[k];
+    return a && a.status === "ok" && a.elapsed_seconds !== null && a.elapsed_seconds < 7200;
+  }).length;
+  const total = AGENT_KEYS.length;
+  const color = ok === total ? "text-emerald-400" : ok >= 5 ? "text-amber-400" : "text-red-400";
+
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <div className="flex gap-0.5">
+        {AGENT_KEYS.map((k) => {
+          const a = agentMap[k];
+          const isOk = a && a.status === "ok" && a.elapsed_seconds !== null && a.elapsed_seconds < 7200;
+          const isErr = a && a.status === "error";
+          return (
+            <span
+              key={k}
+              title={a ? `${a.label} — ${a.ago}` : k}
+              className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                isOk ? "bg-emerald-500" : isErr ? "bg-red-500" : "bg-slate-700"
+              )}
+            />
+          );
+        })}
+      </div>
+      <span className={cn("text-[9px] font-semibold tabular-nums", color)}>
+        {ok}/{total}
+      </span>
+    </div>
+  );
+}
+
+// ─── AssetCard ───────────────────────────────────────────────────────────────
+
+function AssetCard({
+  entry,
+  position,
+  agents,
+  watchlistId,
+  onRemove,
+}: {
+  entry: WatchlistSignalEntry;
+  position: Position | undefined;
+  agents: AgentStatus[];
+  watchlistId: string;
+  onRemove: (ticker: string) => void;
+}) {
+  const { ticker, name, signal } = entry;
+  const label = signal ? signalLabel(signal.signal_type, signal.strength) : "NEUTRE";
+  const cfg = SIGNAL_CONFIG[label] ?? SIGNAL_CONFIG["NEUTRE"];
+
+  const { data: quote } = useQuery<AssetQuote>({
     queryKey: ["quote", ticker],
     queryFn: () => api.assets.quote(ticker),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-3">
-        <div className="w-20 h-4 bg-slate-800 rounded animate-pulse" />
-        <div className="w-[80px] h-8 bg-slate-800 rounded animate-pulse" />
-      </div>
-    );
+  const positive = (quote?.change_pct ?? 0) >= 0;
+  const sparkData = (quote?.history ?? []).map((b) => ({ v: b.close }));
+  const price = quote?.current_price ? formatAssetPrice(quote.current_price, quote.currency) : "—";
+
+  // P&L
+  let pnl: number | null = null;
+  let pnl_pct: number | null = null;
+  if (position && quote?.current_price) {
+    const isGBp = quote.currency === "GBp";
+    const cur = isGBp ? quote.current_price / 100 : quote.current_price;
+    const avg = isGBp ? position.avg_price / 100 : position.avg_price;
+    pnl = (cur - avg) * position.quantity;
+    pnl_pct = avg > 0 ? ((cur - avg) / avg) * 100 : 0;
   }
 
-  if (!quote || !quote.current_price) {
-    return <span className="text-xs text-slate-600">—</span>;
-  }
-
-  const positive = (quote.change_pct ?? 0) >= 0;
-  const sparkData = quote.history.map((b) => ({ v: b.close }));
-
-  const changeBadge = (val: number | null, label: string, muted = false) => {
-    if (val === null) return null;
-    const pos = val >= 0;
-    return (
-      <span
-        className={cn(
-          "font-mono",
-          muted
-            ? pos ? "text-emerald-400/60" : "text-red-400/60"
-            : pos ? "text-emerald-400" : "text-red-400"
-        )}
-      >
-        {label}:{pos ? "+" : ""}{val.toFixed(1)}%
-      </span>
-    );
-  };
-
   return (
-    <div className="flex items-center gap-3">
-      {/* Prix + variations multi-timeframe */}
-      <div className="min-w-[110px]">
-        <p className="text-sm font-mono font-semibold text-slate-100">
-          {formatAssetPrice(quote.current_price, quote.currency)}
-        </p>
-        <div className="flex items-center gap-1.5 text-xs mt-0.5 flex-wrap">
-          <span className={cn("flex items-center gap-0.5 font-medium font-mono", positive ? "text-emerald-400" : "text-red-400")}>
-            {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-            {quote.change_pct !== null ? `${positive ? "+" : ""}${quote.change_pct.toFixed(2)}%` : "—"}
-          </span>
-          {changeBadge(quote.week_change_pct, "1S", true)}
-          {changeBadge(quote.month_change_pct, "1M", true)}
+    <div className={cn(
+      "relative group rounded-xl border border-slate-800 border-l-4 bg-slate-900 transition-all duration-200 hover:border-slate-700 hover:shadow-lg hover:shadow-black/20",
+      cfg.border,
+      cfg.bg,
+    )}>
+      {/* Lien transparent sur toute la card */}
+      <Link href={`/asset/${ticker}`} className="absolute inset-0 rounded-xl z-0" />
+
+      <div className="relative z-10 flex items-center gap-4 px-4 py-3.5">
+
+        {/* Colonne 1 : Ticker + nom */}
+        <div className="w-28 flex-shrink-0">
+          <p className="text-sm font-bold text-slate-100 group-hover:text-blue-400 transition-colors leading-tight">
+            {ticker}
+          </p>
+          <p className="text-xs text-slate-500 truncate mt-0.5" title={name}>{name}</p>
         </div>
-      </div>
 
-      {/* Sparkline 1 mois */}
-      {sparkData.length > 1 && (
-        <div className="hidden lg:block">
-          <Sparkline data={sparkData} positive={positive} />
+        {/* Colonne 2 : Prix + variations + sparkline */}
+        <div className="flex-1 min-w-0">
+          {quote ? (
+            <div className="flex items-center gap-3">
+              <div>
+                <p className="text-sm font-mono font-semibold text-slate-100 leading-tight">{price}</p>
+                <div className="flex items-center gap-1.5 mt-0.5 text-[11px] flex-wrap">
+                  <span className={cn("flex items-center gap-0.5 font-medium font-mono", positive ? "text-emerald-400" : "text-red-400")}>
+                    {positive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                    {quote.change_pct !== null ? `${positive ? "+" : ""}${quote.change_pct.toFixed(2)}%` : "—"}
+                  </span>
+                  {quote.week_change_pct !== null && (
+                    <span className={cn("font-mono", quote.week_change_pct >= 0 ? "text-emerald-400/60" : "text-red-400/60")}>
+                      1S:{quote.week_change_pct >= 0 ? "+" : ""}{quote.week_change_pct.toFixed(1)}%
+                    </span>
+                  )}
+                  {quote.month_change_pct !== null && (
+                    <span className={cn("font-mono", quote.month_change_pct >= 0 ? "text-emerald-400/60" : "text-red-400/60")}>
+                      1M:{quote.month_change_pct >= 0 ? "+" : ""}{quote.month_change_pct.toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+              {sparkData.length > 1 && (
+                <div className="hidden lg:block opacity-70">
+                  <Sparkline data={sparkData} positive={positive} />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="w-20 h-4 bg-slate-800 rounded animate-pulse" />
+              <div className="w-32 h-3 bg-slate-800 rounded animate-pulse" />
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Colonne 3 : P&L */}
+        <div className="w-20 flex-shrink-0 text-right hidden md:block">
+          {pnl !== null && pnl_pct !== null ? (
+            <>
+              <p className={cn("text-sm font-mono font-semibold leading-tight", pnl >= 0 ? "text-emerald-400" : "text-red-400")}>
+                {pnl >= 0 ? "+" : ""}{pnl.toFixed(0)}
+              </p>
+              <p className={cn("text-[11px] font-mono", pnl >= 0 ? "text-emerald-400/70" : "text-red-400/70")}>
+                {pnl >= 0 ? "+" : ""}{pnl_pct.toFixed(1)}%
+              </p>
+            </>
+          ) : (
+            <span className="text-slate-700 text-xs">—</span>
+          )}
+        </div>
+
+        {/* Colonne 4 : Score arc + badge signal */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {signal ? (
+            <>
+              <ScoreArc score={signal.composite_score} />
+              <div className={cn("px-3 py-2 rounded-lg border text-center min-w-[90px]", cfg.badge)}>
+                <p className="text-xs font-bold leading-tight tracking-wide">{label}</p>
+                <p className="text-[10px] mt-0.5 opacity-80">
+                  {Math.round(signal.confidence * 100)}% confiance
+                </p>
+                <p className="text-[9px] mt-0.5 opacity-50">{fmtAgo(signal.timestamp)}</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <ScoreArc score={50} />
+              <div className="px-3 py-2 rounded-lg border border-slate-700/50 bg-slate-800/30 text-center min-w-[90px]">
+                <p className="text-xs text-slate-500 font-medium">En attente</p>
+                <p className="text-[9px] text-slate-600 mt-0.5">Prochain cycle</p>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Colonne 5 : Agents dots */}
+        <div className="flex-shrink-0 hidden lg:block">
+          <AgentsDots agents={agents} />
+        </div>
+
+        {/* Bouton supprimer */}
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(ticker); }}
+          className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-900/20 rounded-lg"
+          title="Retirer de la watchlist"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
 
-function PnLCell({ ticker, position }: { ticker: string; position: Position | undefined }) {
-  const { data: quote } = useQuery<AssetQuote>({
-    queryKey: ["quote", ticker],
-    queryFn: () => api.assets.quote(ticker),
-    staleTime: 30_000,
-    enabled: !!position,
-  });
-
-  if (!position || !quote?.current_price) return <span className="text-slate-700 text-xs">—</span>;
-
-  const isGBp = quote.currency === "GBp";
-  const current = isGBp ? quote.current_price / 100 : quote.current_price;
-  const avg = isGBp ? position.avg_price / 100 : position.avg_price;
-  const pnl = (current - avg) * position.quantity;
-  const pnl_pct = avg > 0 ? ((current - avg) / avg) * 100 : 0;
-  const positive = pnl >= 0;
-
-  return (
-    <div>
-      <p className={cn("text-sm font-mono font-semibold", positive ? "text-emerald-400" : "text-red-400")}>
-        {positive ? "+" : ""}{pnl.toFixed(2)}
-      </p>
-      <p className={cn("text-xs font-mono", positive ? "text-emerald-400/70" : "text-red-400/70")}>
-        {positive ? "+" : ""}{pnl_pct.toFixed(2)}%
-      </p>
-    </div>
-  );
-}
-
-function AssetRow({
-  entry,
-  position,
-  watchlistId,
-  onRemove,
-}: {
-  entry: WatchlistSignalEntry;
-  position: Position | undefined;
-  watchlistId: string;
-  onRemove: (ticker: string) => void;
-}) {
-  const { ticker, name, signal } = entry;
-
-  return (
-    <div className="relative flex items-center gap-3 px-4 py-3 hover:bg-slate-800/50 rounded-lg transition-colors group">
-      <Link href={`/asset/${ticker}`} className="absolute inset-0 rounded-lg" />
-
-      {/* Ticker + nom */}
-      <div className="w-28 flex-shrink-0 relative z-10">
-        <p className="text-sm font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">{ticker}</p>
-        <p className="text-xs text-slate-500 truncate max-w-[112px]">{name}</p>
-      </div>
-
-      {/* Prix + sparkline */}
-      <div className="flex-1 relative z-10">
-        <PriceCell ticker={ticker} />
-      </div>
-
-      {/* P&L si position ouverte */}
-      <div className="w-24 flex-shrink-0 text-right relative z-10">
-        <PnLCell ticker={ticker} position={position} />
-      </div>
-
-      {/* Signal */}
-      <div className="w-28 flex-shrink-0 text-center relative z-10">
-        {signal ? (
-          <SignalBadge type={signal.signal_type} strength={signal.strength} />
-        ) : (
-          <span className="text-xs text-slate-600">En attente</span>
-        )}
-      </div>
-
-      {/* Score */}
-      <div className="w-16 text-right flex-shrink-0 relative z-10">
-        {signal ? (
-          <div>
-            <span className={cn("text-sm font-mono font-semibold", scoreToColor(signal.composite_score))}>
-              {formatScore(signal.composite_score)}
-            </span>
-            <p className="text-xs text-slate-600">{Math.round(signal.confidence * 100)}%</p>
-          </div>
-        ) : (
-          <span className="text-xs text-slate-700">—</span>
-        )}
-      </div>
-
-      {/* Bouton supprimer — visible au survol */}
-      <button
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(ticker); }}
-        className="relative z-10 opacity-0 group-hover:opacity-100 transition-opacity ml-1 p-1 text-slate-600 hover:text-red-400 hover:bg-red-900/20 rounded"
-        title="Retirer de la watchlist"
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  );
-}
+// ─── WatchlistTab ─────────────────────────────────────────────────────────────
 
 function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; threshold: number }) {
   const queryClient = useQueryClient();
@@ -236,6 +316,13 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
     queryKey: ["positions"],
     queryFn: api.portfolio.positions,
     staleTime: 60_000,
+  });
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents-status"],
+    queryFn: api.agents.status,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
 
   const removeMutation = useMutation({
@@ -263,26 +350,21 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
   }
 
   const sorted = [...entries].sort((a, b) => {
-    const sa = a.signal?.composite_score ?? 50;
-    const sb = b.signal?.composite_score ?? 50;
-    return sb - sa;
+    const order = { BUY: 0, SELL: 1, HOLD: 2 };
+    const ta = order[a.signal?.signal_type as keyof typeof order] ?? 2;
+    const tb = order[b.signal?.signal_type as keyof typeof order] ?? 2;
+    if (ta !== tb) return ta - tb;
+    return (b.signal?.composite_score ?? 50) - (a.signal?.composite_score ?? 50);
   });
 
   return (
-    <div className="space-y-0.5">
-      {/* En-têtes */}
-      <div className="flex items-center gap-3 px-4 py-2 text-xs text-slate-600 border-b border-slate-800 mb-1">
-        <span className="w-28">Actif</span>
-        <span className="flex-1">Prix · 1J / 1S / 1M</span>
-        <span className="w-24 text-right">P&L position</span>
-        <span className="w-28 text-center">Signal</span>
-        <span className="w-16 text-right">Score</span>
-      </div>
+    <div className="space-y-2">
       {sorted.map((entry) => (
-        <AssetRow
+        <AssetCard
           key={entry.ticker}
           entry={entry}
           position={positions.find((p) => p.ticker === entry.ticker && p.is_active)}
+          agents={agents}
           watchlistId={watchlistId}
           onRemove={(ticker) => removeMutation.mutate(ticker)}
         />
@@ -290,6 +372,8 @@ function WatchlistTab({ watchlistId, threshold }: { watchlistId: string; thresho
     </div>
   );
 }
+
+// ─── AddAssetModal ────────────────────────────────────────────────────────────
 
 function AddAssetModal({ watchlistId, onClose }: { watchlistId: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -361,6 +445,8 @@ function AddAssetModal({ watchlistId, onClose }: { watchlistId: string; onClose:
   );
 }
 
+// ─── WatchlistPanel ───────────────────────────────────────────────────────────
+
 export function WatchlistPanel() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -393,8 +479,8 @@ export function WatchlistPanel() {
   }
 
   return (
-    <div className="bg-slate-900 rounded-xl border border-slate-800">
-      {/* Tabs + metadata */}
+    <div className="bg-slate-900/50 rounded-xl border border-slate-800">
+      {/* Tabs */}
       <div className="flex items-center border-b border-slate-800 px-4">
         {watchlists.map((wl) => (
           <button
@@ -425,7 +511,6 @@ export function WatchlistPanel() {
         </button>
       </div>
 
-      {/* Contenu */}
       <div className="p-4">
         {currentId && (
           <WatchlistTab
