@@ -72,6 +72,16 @@ function StatRow({ label, value, sub }: { label: string; value: string | null; s
   );
 }
 
+const MONTHS = ["jan", "fév", "mar", "avr", "mai", "jun", "jul", "aoû", "sep", "oct", "nov", "déc"];
+
+function fmtDate(iso: string, short = false): string {
+  const d = new Date(iso);
+  const day = d.getUTCDate();
+  const mon = MONTHS[d.getUTCMonth()];
+  const yr = String(d.getUTCFullYear()).slice(2);
+  return short ? `${day} ${mon}` : `${mon} ${yr}`;
+}
+
 function BenchmarkRow({ label, value, systemValue }: { label: string; value: number; systemValue: number }) {
   const diff = systemValue - value;
   return (
@@ -164,7 +174,7 @@ function computeSimulation(result: BacktestResult, initialCapital = 1000): SimRe
     };
     trades.push(trade);
 
-    const label = new Date(sig.date).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
+    const label = fmtDate(sig.date);
     curve.push({ label, capital: Math.round(capital * 100) / 100 });
 
     if (capital > peak) peak = capital;
@@ -273,7 +283,7 @@ function SimulationPanel({ result }: { result: BacktestResult }) {
             {sim.bestTrade ? `+${sim.bestTrade.gain.toFixed(0)} €` : "—"}
           </p>
           <p className="text-xs text-slate-600">
-            {sim.bestTrade ? `${sim.bestTrade.returnPct > 0 ? "+" : ""}${sim.bestTrade.returnPct.toFixed(1)}% · ${new Date(sim.bestTrade.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}` : ""}
+            {sim.bestTrade ? `${sim.bestTrade.returnPct > 0 ? "+" : ""}${sim.bestTrade.returnPct.toFixed(1)}% · ${fmtDate(sim.bestTrade.date, true)}` : ""}
           </p>
         </div>
         <div className="bg-slate-800/50 rounded-lg p-3">
@@ -282,7 +292,7 @@ function SimulationPanel({ result }: { result: BacktestResult }) {
             {sim.worstTrade ? `${sim.worstTrade.gain.toFixed(0)} €` : "—"}
           </p>
           <p className="text-xs text-slate-600">
-            {sim.worstTrade ? `${sim.worstTrade.returnPct.toFixed(1)}% · ${new Date(sim.worstTrade.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}` : ""}
+            {sim.worstTrade ? `${sim.worstTrade.returnPct.toFixed(1)}% · ${fmtDate(sim.worstTrade.date, true)}` : ""}
           </p>
         </div>
       </div>
@@ -598,7 +608,7 @@ export default function BacktestPage() {
                     return (
                       <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/20">
                         <td className="px-4 py-2 text-slate-500">
-                          {new Date(sig.date).toLocaleDateString("fr-FR")}
+                          {(() => { const d = new Date(sig.date); return `${d.getUTCDate().toString().padStart(2,"0")}/${(d.getUTCMonth()+1).toString().padStart(2,"0")}/${d.getUTCFullYear()}`; })()}
                         </td>
                         <td className="px-4 py-2">
                           <span className={cn(
