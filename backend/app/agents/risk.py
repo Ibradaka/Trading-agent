@@ -443,6 +443,8 @@ async def filter_and_score_all() -> None:
 
             # Filtre adaptatif : seuil de score ajusté selon le profil de l'actif
             if fusion["signal_type"] == "HOLD":
+                from app.services.redis_client import agent_heartbeat
+                await agent_heartbeat("llm", f"{ticker} HOLD score={fusion['score']:.0f}")
                 return
             if fusion["score"] < min_fusion_score:
                 logger.debug(
