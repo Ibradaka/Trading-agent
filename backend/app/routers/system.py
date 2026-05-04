@@ -89,6 +89,17 @@ async def toggle_panic():
     return {"panic_mode": new_val}
 
 
+@router.post("/refresh")
+async def force_refresh():
+    """Force un cycle complet : sentiment + scoring immédiat."""
+    import asyncio
+    from app.agents.sentiment import update_all_sentiments
+    from app.agents.risk import filter_and_score_all
+    asyncio.create_task(update_all_sentiments())
+    asyncio.create_task(filter_and_score_all())
+    return {"triggered": True}
+
+
 @router.get("/status")
 async def system_status():
     """État opérationnel global du système."""

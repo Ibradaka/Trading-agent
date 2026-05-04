@@ -1,25 +1,53 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Signal } from "@/lib/api";
 import Link from "next/link";
 import { cn, scoreToColor, formatScore } from "@/lib/utils";
-import { Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, Minus, RefreshCw } from "lucide-react";
+import { useState } from "react";
 
 export function ActiveSignalsPanel() {
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+
   const { data: recent = [], isLoading } = useQuery({
     queryKey: ["signals-top"],
     queryFn: api.signals.top,
     refetchInterval: 60_000,
   });
 
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await api.settings.refresh();
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["signals-top"] });
+        queryClient.invalidateQueries({ queryKey: ["signals-active"] });
+        setRefreshing(false);
+      }, 5000);
+    } catch {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <div className="bg-slate-900 rounded-xl border border-slate-800">
       <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">Alertes récentes</h2>
-        {recent.length > 0 && (
-          <span className="text-xs text-slate-500">{recent.length}</span>
-        )}
+        <div className="flex items-center gap-2">
+          {recent.length > 0 && (
+            <span className="text-xs text-slate-500">{recent.length}</span>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="p-1 rounded hover:bg-slate-800 transition-colors disabled:opacity-40"
+            title="Forcer un cycle de scoring"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5 text-slate-500", refreshing && "animate-spin")} />
+          </button>
+        </div>
       </div>
 
       {isLoading ? (

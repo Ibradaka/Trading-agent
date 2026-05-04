@@ -403,6 +403,7 @@ export const api = {
     togglePanic: () =>
       request<{ panic_mode: boolean }>("/api/settings/panic", { method: "POST" }),
     status: () => request<SystemStatus>("/api/settings/status"),
+    refresh: () => request<{ triggered: boolean }>("/api/settings/refresh", { method: "POST" }),
   },
 
   agents: {
