@@ -349,6 +349,7 @@ export const api = {
       request<Signal[]>(`/api/signals/${ticker}/history?limit=${limit}`),
     active: () => request<Signal[]>("/api/signals/active"),
     recent: (limit = 50) => request<SignalWithOutcome[]>(`/api/signals/recent?limit=${limit}`),
+    top: () => request<Signal[]>("/api/signals/top"),
     outcome: (signalId: string) => request<SignalOutcome[]>(`/api/signals/${signalId}/outcome`),
   },
 

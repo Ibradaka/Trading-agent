@@ -44,6 +44,53 @@ async def get_recent_signals(
     return await get_recent_signals_with_outcomes(limit=limit)
 
 
+@router.get("/top")
+async def get_top_signals(db: AsyncSession = Depends(get_session)):
+    """Retourne les 5 actifs avec les scores les plus extrêmes (Redis cache).
+    Utile pour le panneau Alertes même quand aucun BUY/SELL n'est en DB."""
+    from app.services.redis_client import cache_get
+    from app.agents.watchlist_manager import get_active_tickers
+
+    tickers = await get_active_tickers(db)
+    entries = []
+    for ticker, _ in tickers:
+        cached = await cache_get(f"signal:{ticker.upper()}")
+        if not cached:
+            continue
+        score = cached.get("fusion_score") or 50.0
+        asset_result = await db.execute(select(Asset).where(Asset.ticker == ticker.upper()))
+        asset = asset_result.scalar_one_or_none()
+        if not asset:
+            continue
+        entries.append({
+            "id": cached.get("signal_id"),
+            "ticker": asset.ticker,
+            "asset_name": asset.name,
+            "signal_type": cached.get("signal_type", "HOLD"),
+            "strength": cached.get("signal_strength", "weak"),
+            "composite_score": score,
+            "confidence": cached.get("confidence"),
+            "asset_label": cached.get("asset_label", "unknown"),
+            "scores": {
+                "technical": cached.get("technical_score"),
+                "patterns": cached.get("pattern_score"),
+                "sentiment": cached.get("sentiment_score"),
+                "macro": cached.get("macro_score"),
+                "momentum": cached.get("momentum_score"),
+            },
+            "reasoning": None,
+            "risks": None,
+            "invalidation_conditions": None,
+            "horizon": None,
+            "timestamp": cached.get("timestamp"),
+            "is_active": True,
+        })
+
+    # Trie par score le plus extrême (distance par rapport à 50)
+    entries.sort(key=lambda e: abs((e["composite_score"] or 50) - 50), reverse=True)
+    return entries[:5]
+
+
 @router.get("/active")
 async def get_active_signals(db: AsyncSession = Depends(get_session)):
     """Retourne tous les signaux BUY/SELL actifs (DB + fallback Redis)."""
