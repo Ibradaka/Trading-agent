@@ -148,6 +148,7 @@ async def start_scheduler() -> None:
         id="market_data_pipeline",
         replace_existing=True,
         max_instances=1,
+        next_run_time=datetime.now(timezone.utc),
     )
 
     _scheduler.add_job(
@@ -156,6 +157,7 @@ async def start_scheduler() -> None:
         id="sentiment_update",
         replace_existing=True,
         max_instances=1,
+        next_run_time=datetime.now(timezone.utc),
     )
 
     _scheduler.add_job(
