@@ -46,7 +46,10 @@ async def get_recent_signals(
 
 @router.get("/active")
 async def get_active_signals(db: AsyncSession = Depends(get_session)):
-    """Retourne tous les signaux BUY/SELL actifs triés par score décroissant."""
+    """Retourne tous les signaux BUY/SELL actifs (DB + fallback Redis)."""
+    from app.services.redis_client import cache_get
+    from app.agents.watchlist_manager import get_active_tickers
+
     result = await db.execute(
         select(Signal, Asset)
         .join(Asset, Asset.id == Signal.asset_id)
@@ -58,7 +61,49 @@ async def get_active_signals(db: AsyncSession = Depends(get_session)):
         .limit(20)
     )
     rows = result.all()
-    return [_format_signal(signal, asset) for signal, asset in rows]
+    db_signals = [_format_signal(signal, asset) for signal, asset in rows]
+    db_tickers = {s["ticker"] for s in db_signals}
+
+    # Complète avec les signaux Redis BUY/SELL non encore en DB
+    tickers = await get_active_tickers(db)
+    for ticker, _ in tickers:
+        if ticker.upper() in db_tickers:
+            continue
+        cached = await cache_get(f"signal:{ticker.upper()}")
+        if not cached:
+            continue
+        if cached.get("signal_type") not in ("BUY", "SELL"):
+            continue
+        asset_result = await db.execute(select(Asset).where(Asset.ticker == ticker.upper()))
+        asset = asset_result.scalar_one_or_none()
+        if not asset:
+            continue
+        db_signals.append({
+            "id": None,
+            "ticker": asset.ticker,
+            "asset_name": asset.name,
+            "signal_type": cached.get("signal_type"),
+            "strength": cached.get("signal_strength", "weak"),
+            "composite_score": cached.get("fusion_score"),
+            "confidence": cached.get("confidence"),
+            "asset_label": cached.get("asset_label", "unknown"),
+            "scores": {
+                "technical": cached.get("technical_score"),
+                "patterns": cached.get("pattern_score"),
+                "sentiment": cached.get("sentiment_score"),
+                "macro": cached.get("macro_score"),
+                "momentum": cached.get("momentum_score"),
+            },
+            "reasoning": None,
+            "risks": None,
+            "invalidation_conditions": None,
+            "horizon": None,
+            "timestamp": cached.get("timestamp"),
+            "is_active": True,
+        })
+
+    db_signals.sort(key=lambda s: s.get("composite_score") or 0, reverse=True)
+    return db_signals[:20]
 
 
 @router.get("/{ticker}/latest")

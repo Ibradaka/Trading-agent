@@ -112,11 +112,19 @@ async def system_status():
     except Exception:
         pass
 
-    # Cache sentiment
-    sentiment_cached = await cache_get("sentiment:cache:global") is not None
+    # Cache sentiment — vérifie n'importe quel ticker actif
+    from app.agents.watchlist_manager import get_active_tickers
+    from app.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as _s:
+        _tickers = await get_active_tickers(_s)
+    sentiment_cached = False
+    for _t, _ in _tickers:
+        if await cache_get(f"sentiment:{_t.upper()}") is not None:
+            sentiment_cached = True
+            break
 
     # Cache macro
-    macro_cached = await cache_get("macro:cache:global") is not None
+    macro_cached = await cache_get("macro:score:global") is not None
 
     return {
         "panic_mode": cfg["panic_mode"],
