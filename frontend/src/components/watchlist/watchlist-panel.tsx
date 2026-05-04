@@ -271,11 +271,11 @@ function AssetCard({
                 <ScoreArc score={signal.composite_score} />
                 {(() => {
                   const prof = PROFILE_LABELS[signal.asset_label ?? "unknown"] ?? PROFILE_LABELS.unknown;
-                  return signal.asset_label && signal.asset_label !== "unknown" ? (
+                  return (
                     <span className={cn("text-[9px] font-medium leading-none", prof.color)}>
                       {prof.label}
                     </span>
-                  ) : null;
+                  );
                 })()}
               </div>
               <div className={cn("px-2.5 py-1.5 rounded-lg border text-center min-w-[90px]", cfg.badge)}>

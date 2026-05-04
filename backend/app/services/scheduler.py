@@ -66,6 +66,33 @@ async def _run_macro_update() -> None:
         logger.exception("Macro update failed")
 
 
+async def _run_backtest_all() -> None:
+    """Lance le backtest sur tous les actifs actifs pour calculer leur profil (label).
+    Tourne au démarrage et chaque dimanche à 06h00."""
+    try:
+        from app.agents.watchlist_manager import get_active_tickers
+        from app.database import AsyncSessionLocal
+        from app.backtesting.engine import run_backtest
+
+        async with AsyncSessionLocal() as session:
+            tickers = await get_active_tickers(session)
+
+        if not tickers:
+            return
+
+        logger.info("Auto-backtest starting", count=len(tickers))
+        for ticker, _ in tickers:
+            try:
+                await run_backtest(ticker, period="2y", min_fusion_score=60.0, horizon_days=20)
+                logger.info("Auto-backtest done", ticker=ticker)
+            except Exception:
+                logger.exception("Auto-backtest failed", ticker=ticker)
+
+        logger.info("Auto-backtest complete", count=len(tickers))
+    except Exception:
+        logger.exception("Auto-backtest job failed")
+
+
 async def _run_score_refresh_offhours() -> None:
     """Rafraîchit le cache signal Redis hors heures de marché (données DB existantes).
     Évite que les scores disparaissent overnight."""
@@ -134,6 +161,15 @@ async def start_scheduler() -> None:
         replace_existing=True,
         max_instances=1,
         next_run_time=datetime.now(timezone.utc),  # Run immediately at startup
+    )
+
+    _scheduler.add_job(
+        _run_backtest_all,
+        trigger=CronTrigger(day_of_week="sun", hour=6, minute=0, timezone="Europe/Paris"),
+        id="auto_backtest",
+        replace_existing=True,
+        max_instances=1,
+        next_run_time=datetime.now(timezone.utc),  # Lance immédiatement au démarrage
     )
 
     _scheduler.add_job(
