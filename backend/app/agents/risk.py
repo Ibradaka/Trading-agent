@@ -438,7 +438,7 @@ async def filter_and_score_all() -> None:
                 "confidence": None,
                 "confidence_label": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-            }, ttl=15 * 60)
+            }, 15 * 60)
 
             # Filtre adaptatif : seuil de score ajusté selon le profil de l'actif
             if fusion["signal_type"] == "HOLD":
@@ -541,7 +541,7 @@ async def filter_and_score_all() -> None:
                 "confidence_label": confidence_ctx["label"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "signal_id": signal_id,
-            }, ttl=4 * 3600)
+            }, 4 * 3600)
 
             await publish(f"signal:updated:{ticker}", {
                 "ticker": ticker,
