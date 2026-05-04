@@ -11,7 +11,11 @@ _client: AsyncOpenAI | None = None
 def get_openai_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
+        _client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            timeout=20.0,
+            max_retries=2,
+        )
     return _client
 
 
@@ -42,7 +46,15 @@ async def score_sentiment_batch(ticker: str, titles: list[str]) -> list[float]:
             max_tokens=120,
             temperature=0.1,
         )
-        content = resp.choices[0].message.content.strip()
+        content = (resp.choices[0].message.content or "").strip()
+        if not content:
+            logger.warning("LLM sentiment empty response", ticker=ticker)
+            return [0.0] * len(titles)
+        # Extrait le premier tableau JSON trouvé dans la réponse
+        start = content.find("[")
+        end = content.rfind("]") + 1
+        if start >= 0 and end > start:
+            content = content[start:end]
         scores = json.loads(content)
         if isinstance(scores, list):
             return [max(-1.0, min(1.0, float(s))) for s in scores[: len(titles)]]
