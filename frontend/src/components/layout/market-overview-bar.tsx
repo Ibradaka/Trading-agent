@@ -43,7 +43,7 @@ const ALL_ITEMS = MARKET_GROUPS.flatMap((g) => g.items);
 function formatPrice(price: number | null, ticker: string): string {
   if (price === null) return "—";
   if (ticker.startsWith("^VIX") || ticker === "^TNX") return price.toFixed(2);
-  if (price >= 1000) return price.toLocaleString("fr-FR", { maximumFractionDigits: 0 });
+  if (price >= 1000) return Math.round(price).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   if (price >= 100) return price.toFixed(2);
   return price.toFixed(2);
 }

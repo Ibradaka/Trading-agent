@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 export function Header() {
@@ -49,13 +49,22 @@ export function Header() {
 }
 
 function MarketStatus() {
-  const now = new Date();
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  const day = now.getDay();
-  const isWeekend = day === 0 || day === 6;
-  const timeInMinutes = hours * 60 + minutes;
-  const isOpen = !isWeekend && timeInMinutes >= 9 * 60 && timeInMinutes <= 17 * 60 + 30;
+  const [isOpen, setIsOpen] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const check = () => {
+      const now = new Date();
+      const day = now.getDay();
+      const isWeekend = day === 0 || day === 6;
+      const timeInMinutes = now.getHours() * 60 + now.getMinutes();
+      setIsOpen(!isWeekend && timeInMinutes >= 9 * 60 && timeInMinutes <= 17 * 60 + 30);
+    };
+    check();
+    const id = setInterval(check, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (isOpen === null) return null;
 
   return (
     <div className={cn("flex items-center gap-1.5 text-xs px-2 py-1 rounded", isOpen ? "text-emerald-400 bg-emerald-500/10" : "text-slate-500 bg-slate-800")}>
