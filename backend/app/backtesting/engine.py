@@ -496,6 +496,15 @@ async def run_backtest(
     sell_sigs = [s for s in signals if s["signal_type"] == "SELL"]
     diagnostics = _compute_diagnostics(signals, df, horizon=horizon_days)
 
+    # Persiste le profil adaptatif en Redis pour le pipeline live
+    from app.services.asset_profile import save_asset_profile
+    await save_asset_profile(
+        ticker=ticker.upper(),
+        label=diagnostics.get("label", "mixed"),
+        recommendation=diagnostics.get("recommendation", "monitor"),
+        label_reason=diagnostics.get("label_reason", ""),
+    )
+
     return {
         "ticker": ticker.upper(),
         "period": period,
