@@ -130,7 +130,10 @@ async def get_signal_outcome(signal_id: str, db: AsyncSession = Depends(get_sess
 
 @router.get("/watchlist/{watchlist_id}")
 async def get_watchlist_signals(watchlist_id: UUID, db: AsyncSession = Depends(get_session)):
-    """Retourne les derniers signaux actifs pour tous les actifs d'une watchlist."""
+    """Retourne les derniers signaux actifs pour tous les actifs d'une watchlist.
+    Fallback sur le cache Redis pour les actifs sans signal DB (HOLD courant)."""
+    from app.services.redis_client import cache_get
+
     wl_result = await db.execute(select(Watchlist).where(Watchlist.id == watchlist_id))
     if not wl_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Watchlist not found")
@@ -151,12 +154,44 @@ async def get_watchlist_signals(watchlist_id: UUID, db: AsyncSession = Depends(g
             .limit(1)
         )
         signal = signal_result.scalar_one_or_none()
+
+        if signal:
+            signal_payload = _format_signal(signal, asset)
+        else:
+            # Fallback Redis : affiche l'état HOLD courant du pipeline
+            cached = await cache_get(f"signal:{asset.ticker.upper()}")
+            if cached:
+                signal_payload = {
+                    "id": None,
+                    "ticker": asset.ticker,
+                    "asset_name": asset.name,
+                    "signal_type": cached.get("signal_type", "HOLD"),
+                    "strength": cached.get("signal_strength", "weak"),
+                    "composite_score": cached.get("fusion_score"),
+                    "confidence": cached.get("confidence"),
+                    "scores": {
+                        "technical": cached.get("technical_score"),
+                        "patterns": cached.get("pattern_score"),
+                        "sentiment": cached.get("sentiment_score"),
+                        "macro": cached.get("macro_score"),
+                        "momentum": cached.get("momentum_score"),
+                    },
+                    "reasoning": None,
+                    "risks": None,
+                    "invalidation_conditions": None,
+                    "horizon": None,
+                    "timestamp": cached.get("timestamp"),
+                    "is_active": True,
+                }
+            else:
+                signal_payload = None
+
         signals_data.append({
             "ticker": asset.ticker,
             "name": asset.name,
             "is_pea_eligible": asset.is_pea_eligible,
             "asset_type": asset.asset_type,
-            "signal": _format_signal(signal, asset) if signal else None,
+            "signal": signal_payload,
         })
 
     return signals_data

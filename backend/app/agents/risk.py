@@ -423,6 +423,23 @@ async def filter_and_score_all() -> None:
             # 3c. Signal Fusion Engine — décision déterministe backtestable
             fusion = compute_fusion_score(breakdown)
 
+            # Toujours cacher le score courant pour l'UI (même si HOLD)
+            await cache_set(f"signal:{ticker.upper()}", {
+                "ticker": ticker,
+                "signal_type": fusion["signal_type"],
+                "signal_strength": fusion["signal_strength"],
+                "fusion_score": fusion["score"],
+                "composite_score": breakdown.composite,
+                "technical_score": breakdown.technical,
+                "pattern_score": breakdown.patterns,
+                "momentum_score": breakdown.momentum,
+                "macro_score": breakdown.macro,
+                "sentiment_score": breakdown.sentiment,
+                "confidence": None,
+                "confidence_label": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }, ttl=15 * 60)
+
             # Filtre adaptatif : seuil de score ajusté selon le profil de l'actif
             if fusion["signal_type"] == "HOLD":
                 return
@@ -507,6 +524,24 @@ async def filter_and_score_all() -> None:
                 await session.commit()
 
             await set_cooldown(ticker, hours=cooldown_hours)
+
+            # Met à jour le cache Redis avec les infos de confiance complètes
+            await cache_set(f"signal:{ticker.upper()}", {
+                "ticker": ticker,
+                "signal_type": fusion["signal_type"],
+                "signal_strength": fusion["signal_strength"],
+                "fusion_score": fusion["score"],
+                "composite_score": breakdown.composite,
+                "technical_score": breakdown.technical,
+                "pattern_score": breakdown.patterns,
+                "momentum_score": breakdown.momentum,
+                "macro_score": breakdown.macro,
+                "sentiment_score": breakdown.sentiment,
+                "confidence": confidence_ctx["score"] / 100.0,
+                "confidence_label": confidence_ctx["label"],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "signal_id": signal_id,
+            }, ttl=4 * 3600)
 
             await publish(f"signal:updated:{ticker}", {
                 "ticker": ticker,
