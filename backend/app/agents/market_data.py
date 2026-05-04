@@ -1,12 +1,11 @@
 """
-Market Data Agent — collecte OHLC via yfinance, upsert TimescaleDB, pub Redis.
+Market Data Agent — collecte OHLC via curl_cffi (contourne blocage datacenter), upsert DB, pub Redis.
 """
 import asyncio
 import structlog
 import pandas as pd
-import yfinance as yf
 from sqlalchemy import text
-from app.services.yfinance_session import get_yf_session, yf_chart
+from app.services.yfinance_session import get_yf_session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -16,27 +15,53 @@ from app.agents.watchlist_manager import get_active_tickers
 logger = structlog.get_logger()
 
 TIMEFRAME_PARAMS: dict[str, dict] = {
-    "1d":  {"period": "1y",  "interval": "1d"},
-    "1h":  {"period": "60d", "interval": "1h"},
-    "15m": {"period": "5d",  "interval": "15m"},
+    "1d":  {"interval": "1d", "range": "1y"},
+    "1h":  {"interval": "1h", "range": "60d"},
+    "15m": {"interval": "15m", "range": "5d"},
 }
 
 
-def _yf_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
-    """Synchrone — appeler via asyncio.to_thread."""
-    yfobj = yf.Ticker(ticker, session=get_yf_session())
-    df = yfobj.history(period=period, interval=interval, auto_adjust=True)
-    if df.empty:
-        return df
-    df.index = pd.to_datetime(df.index, utc=True)
-    df.columns = [c.lower() for c in df.columns]
-    return df[["open", "high", "low", "close", "volume"]]
+def _yf_history(ticker: str, interval: str, range_: str) -> pd.DataFrame:
+    """Synchrone — fetch OHLC via curl_cffi direct (pas yf.Ticker)."""
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        f"?interval={interval}&range={range_}"
+    )
+    try:
+        r = get_yf_session().get(url, timeout=20)
+        result = (r.json().get("chart", {}).get("result") or [None])[0]
+        if not result:
+            return pd.DataFrame()
+        timestamps = result.get("timestamp") or []
+        q = (result.get("indicators", {}).get("quote") or [{}])[0]
+        adj_list = (result.get("indicators", {}).get("adjclose") or [{}])[0].get("adjclose") or []
+        rows = []
+        for i, ts in enumerate(timestamps):
+            close_raw = q.get("close", [])[i] if i < len(q.get("close", [])) else None
+            close_adj = adj_list[i] if adj_list and i < len(adj_list) else close_raw
+            if close_adj is None:
+                continue
+            rows.append({
+                "timestamp": pd.Timestamp(ts, unit="s", tz="UTC"),
+                "open":   q.get("open",   [])[i] if i < len(q.get("open",   [])) else None,
+                "high":   q.get("high",   [])[i] if i < len(q.get("high",   [])) else None,
+                "low":    q.get("low",    [])[i] if i < len(q.get("low",    [])) else None,
+                "close":  close_adj,
+                "volume": q.get("volume", [])[i] if i < len(q.get("volume", [])) else 0,
+            })
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows).set_index("timestamp")
+        return df[["open", "high", "low", "close", "volume"]]
+    except Exception as e:
+        logger.warning("curl_cffi fetch failed", ticker=ticker, error=str(e))
+        return pd.DataFrame()
 
 
 async def fetch_ohlc(ticker: str, timeframe: str = "1d") -> pd.DataFrame:
     """Retourne un DataFrame OHLC indexé par timestamp UTC."""
     params = TIMEFRAME_PARAMS.get(timeframe, TIMEFRAME_PARAMS["1d"])
-    return await asyncio.to_thread(_yf_history, ticker, params["period"], params["interval"])
+    return await asyncio.to_thread(_yf_history, ticker, params["interval"], params["range"])
 
 
 async def upsert_ohlc(session: AsyncSession, asset_id: str, df: pd.DataFrame, timeframe: str = "1d") -> int:
