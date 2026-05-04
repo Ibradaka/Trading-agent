@@ -20,6 +20,16 @@ function fmtAgo(iso: string | undefined): string {
   return `il y a ${Math.floor(diff / 86400)} j`;
 }
 
+const PROFILE_LABELS: Record<string, { label: string; color: string }> = {
+  robust:       { label: "Robuste",   color: "text-emerald-400/70" },
+  noisy:        { label: "Bruité",    color: "text-amber-400/70" },
+  over_traded:  { label: "Sur-tradé", color: "text-orange-400/70" },
+  unstable:     { label: "Instable",  color: "text-red-400/70" },
+  bearish_asset:{ label: "Baissier",  color: "text-red-400/70" },
+  mixed:        { label: "Mixte",     color: "text-slate-400/70" },
+  unknown:      { label: "Inconnu",   color: "text-slate-600" },
+};
+
 const SIGNAL_CONFIG: Record<string, { border: string; bg: string; badge: string; text: string; dot: string }> = {
   "ACHAT FORT": {
     border: "border-l-emerald-500",
@@ -257,11 +267,21 @@ function AssetCard({
         <div className="flex items-center gap-3 flex-shrink-0">
           {signal ? (
             <>
-              <ScoreArc score={signal.composite_score} />
+              <div className="flex flex-col items-center gap-0.5">
+                <ScoreArc score={signal.composite_score} />
+                {(() => {
+                  const prof = PROFILE_LABELS[signal.asset_label ?? "unknown"] ?? PROFILE_LABELS.unknown;
+                  return signal.asset_label && signal.asset_label !== "unknown" ? (
+                    <span className={cn("text-[9px] font-medium leading-none", prof.color)}>
+                      {prof.label}
+                    </span>
+                  ) : null;
+                })()}
+              </div>
               <div className={cn("px-3 py-2 rounded-lg border text-center min-w-[90px]", cfg.badge)}>
                 <p className="text-xs font-bold leading-tight tracking-wide">{label}</p>
                 <p className="text-[10px] mt-0.5 opacity-80">
-                  {Math.round(signal.confidence * 100)}% confiance
+                  {signal.confidence != null ? `${Math.round(signal.confidence * 100)}% confiance` : "—"}
                 </p>
                 <p className="text-[9px] mt-0.5 opacity-50">{fmtAgo(signal.timestamp)}</p>
               </div>

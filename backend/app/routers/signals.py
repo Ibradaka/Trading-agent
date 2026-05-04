@@ -169,6 +169,7 @@ async def get_watchlist_signals(watchlist_id: UUID, db: AsyncSession = Depends(g
                     "strength": cached.get("signal_strength", "weak"),
                     "composite_score": cached.get("fusion_score"),
                     "confidence": cached.get("confidence"),
+                    "asset_label": cached.get("asset_label", "unknown"),
                     "scores": {
                         "technical": cached.get("technical_score"),
                         "patterns": cached.get("pattern_score"),

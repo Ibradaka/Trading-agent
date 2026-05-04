@@ -437,6 +437,7 @@ async def filter_and_score_all() -> None:
                 "sentiment_score": breakdown.sentiment,
                 "confidence": None,
                 "confidence_label": None,
+                "asset_label": profile["label"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }, 15 * 60)
 
@@ -539,6 +540,7 @@ async def filter_and_score_all() -> None:
                 "sentiment_score": breakdown.sentiment,
                 "confidence": confidence_ctx["score"] / 100.0,
                 "confidence_label": confidence_ctx["label"],
+                "asset_label": profile["label"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "signal_id": signal_id,
             }, 4 * 3600)

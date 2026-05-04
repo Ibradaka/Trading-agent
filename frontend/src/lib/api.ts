@@ -82,6 +82,7 @@ export interface Signal {
   strength: "strong" | "weak";
   composite_score: number;
   confidence: number;
+  asset_label?: string;
   scores: ScoreBreakdown;
   reasoning: string;
   risks: string[];
