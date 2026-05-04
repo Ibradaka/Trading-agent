@@ -6,7 +6,8 @@ from curl_cffi.requests import Session
 
 _session: Session | None = None
 
-_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1mo"
+_CHART_1D_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1mo"
+_CHART_1MIN_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=1d"
 _SUMMARY_URL = (
     "https://query2.finance.yahoo.com/v11/finance/quoteSummary/{ticker}"
     "?modules=price,summaryProfile,assetProfile"
@@ -27,7 +28,7 @@ def get_yf_session() -> Session:
 def yf_chart(ticker: str) -> dict:
     """Retourne le dict meta du chart Yahoo Finance (price, currency, exchange…)."""
     try:
-        r = get_yf_session().get(_CHART_URL.format(ticker=ticker), timeout=15)
+        r = get_yf_session().get(_CHART_1D_URL.format(ticker=ticker), timeout=15)
         results = r.json().get("chart", {}).get("result") or []
         return results[0].get("meta", {}) if results else {}
     except Exception:
@@ -35,9 +36,19 @@ def yf_chart(ticker: str) -> dict:
 
 
 def yf_chart_full(ticker: str) -> dict:
-    """Retourne le résultat complet du chart Yahoo Finance (meta + timestamps + OHLCV)."""
+    """Retourne le résultat complet du chart 1d/1mo (meta + timestamps + OHLCV journalier)."""
     try:
-        r = get_yf_session().get(_CHART_URL.format(ticker=ticker), timeout=15)
+        r = get_yf_session().get(_CHART_1D_URL.format(ticker=ticker), timeout=15)
+        results = r.json().get("chart", {}).get("result") or []
+        return results[0] if results else {}
+    except Exception:
+        return {}
+
+
+def yf_intraday(ticker: str) -> dict:
+    """Retourne meta + OHLCV intraday 1min/1d — source fiable pour OHLC du jour en cours."""
+    try:
+        r = get_yf_session().get(_CHART_1MIN_URL.format(ticker=ticker), timeout=15)
         results = r.json().get("chart", {}).get("result") or []
         return results[0] if results else {}
     except Exception:

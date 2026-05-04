@@ -8,7 +8,7 @@ import uuid
 
 from app.database import get_session
 from app.models.db import Asset
-from app.services.yfinance_session import yf_chart, yf_chart_full, yf_quote_summary, yf_news, get_yf_session
+from app.services.yfinance_session import yf_chart, yf_chart_full, yf_intraday, yf_quote_summary, yf_news, get_yf_session
 from app.services.redis_client import cache_get, cache_set
 from app.services.llm import translate_titles_to_french
 
@@ -147,15 +147,21 @@ async def validate_and_add_asset(
 
 def _fetch_quote(ticker: str) -> dict:
     """Synchrone — appelé via asyncio.to_thread.
-    Retourne prix courant + OHLC du jour + 52S range + historique 1mo + variations multi-timeframe."""
-    full = yf_chart_full(ticker)
+    Retourne prix courant + OHLC du jour + 52S range + historique 1mo + variations multi-timeframe.
+    Utilise l'intraday 1m/1d comme source principale pour l'OHLC du jour en cours."""
+
+    # Appels parallèles : chart 1d/1mo pour historique + intraday 1m/1d pour OHLC live
+    daily = yf_chart_full(ticker)
+    intra = yf_intraday(ticker)
     summary = yf_quote_summary(ticker)
-    meta = full.get("meta", {})
+
+    # Meta : priorité intraday (plus frais), fallback daily
+    meta = intra.get("meta") or daily.get("meta", {})
     price_data = summary.get("price", {})
 
-    timestamps = full.get("timestamp") or []
-    quotes_raw = (full.get("indicators", {}).get("quote") or [{}])[0]
-
+    # Historique mensuel (bougies journalières pour sparkline + variations)
+    timestamps = daily.get("timestamp") or []
+    quotes_raw = (daily.get("indicators", {}).get("quote") or [{}])[0]
     closes = quotes_raw.get("close") or []
     opens_arr = quotes_raw.get("open") or []
     highs_arr = quotes_raw.get("high") or []
@@ -176,7 +182,21 @@ def _fetch_quote(ticker: str) -> dict:
             "volume": volumes_arr[i] if i < len(volumes_arr) else None,
         })
 
-    current_price = meta.get("regularMarketPrice")
+    # OHLC du jour depuis intraday : agrège toutes les bougies 1min
+    intra_q = (intra.get("indicators", {}).get("quote") or [{}])[0]
+    intra_opens = [v for v in (intra_q.get("open") or []) if v is not None]
+    intra_highs = [v for v in (intra_q.get("high") or []) if v is not None]
+    intra_lows = [v for v in (intra_q.get("low") or []) if v is not None]
+    intra_closes = [v for v in (intra_q.get("close") or []) if v is not None]
+    intra_volumes = [v for v in (intra_q.get("volume") or []) if v is not None]
+
+    intra_open = intra_opens[0] if intra_opens else None
+    intra_high = max(intra_highs) if intra_highs else None
+    intra_low = min(intra_lows) if intra_lows else None
+    intra_close = intra_closes[-1] if intra_closes else None
+    intra_volume = int(sum(intra_volumes)) if intra_volumes else None
+
+    current_price = intra_close or meta.get("regularMarketPrice")
     previous_close = meta.get("previousClose") or meta.get("chartPreviousClose")
 
     change_pct = None
@@ -197,6 +217,8 @@ def _fetch_quote(ticker: str) -> dict:
             return val.get("raw")
         return val
 
+    last_bar = history[-1] if history else {}
+
     return {
         "ticker": ticker,
         "current_price": current_price,
@@ -207,10 +229,10 @@ def _fetch_quote(ticker: str) -> dict:
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName"),
         "market_state": meta.get("marketState"),
-        "open": _raw("regularMarketOpen"),
-        "day_high": _raw("regularMarketDayHigh"),
-        "day_low": _raw("regularMarketDayLow"),
-        "volume": _raw("regularMarketVolume"),
+        "open": intra_open or _raw("regularMarketOpen") or last_bar.get("open"),
+        "day_high": intra_high or _raw("regularMarketDayHigh") or last_bar.get("high"),
+        "day_low": intra_low or _raw("regularMarketDayLow") or last_bar.get("low"),
+        "volume": intra_volume or _raw("regularMarketVolume") or last_bar.get("volume"),
         "week52_high": _raw("fiftyTwoWeekHigh"),
         "week52_low": _raw("fiftyTwoWeekLow"),
         "history": history,
