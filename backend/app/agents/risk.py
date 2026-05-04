@@ -60,7 +60,7 @@ def _volatility_filter(ind: dict) -> tuple[bool, str]:
 
 
 def _score_filter(composite_score: float) -> tuple[bool, str]:
-    if 40.0 <= composite_score <= 60.0:
+    if 42.0 <= composite_score <= 60.0:
         return False, f"score_neutre_{composite_score:.0f}"
     return True, f"score_signal_{composite_score:.0f}"
 
