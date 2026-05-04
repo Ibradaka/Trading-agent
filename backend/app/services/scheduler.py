@@ -89,6 +89,10 @@ async def _run_backtest_all() -> None:
                 logger.exception("Auto-backtest failed", ticker=ticker)
 
         logger.info("Auto-backtest complete", count=len(tickers))
+
+        # Rafraîchit immédiatement le cache signal avec les nouveaux labels
+        from app.agents.risk import filter_and_score_all
+        await filter_and_score_all()
     except Exception:
         logger.exception("Auto-backtest job failed")
 
