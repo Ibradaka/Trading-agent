@@ -91,12 +91,25 @@ async def toggle_panic():
 
 @router.post("/refresh")
 async def force_refresh():
-    """Force un cycle complet : sentiment + scoring immédiat."""
+    """Force un cycle complet : market data + sentiment + scoring."""
     import asyncio
+    from app.agents.market_data import fetch_all_active_assets
+    from app.agents.technical import compute_all_indicators
+    from app.agents.patterns import detect_all_patterns
     from app.agents.sentiment import update_all_sentiments
     from app.agents.risk import filter_and_score_all
-    asyncio.create_task(update_all_sentiments())
-    asyncio.create_task(filter_and_score_all())
+
+    async def _run():
+        try:
+            await fetch_all_active_assets()
+            await compute_all_indicators()
+            await detect_all_patterns()
+            await update_all_sentiments()
+            await filter_and_score_all()
+        except Exception:
+            pass
+
+    asyncio.ensure_future(_run())
     return {"triggered": True}
 
 
