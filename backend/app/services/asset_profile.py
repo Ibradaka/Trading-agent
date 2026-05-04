@@ -64,7 +64,7 @@ async def save_asset_profile(ticker: str, label: str, recommendation: str, label
         "params": params,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await cache_set(f"{_PROFILE_PREFIX}{ticker}", profile, ttl=_PROFILE_TTL)
+    await cache_set(f"{_PROFILE_PREFIX}{ticker}", profile, _PROFILE_TTL)
 
 
 async def load_asset_profile(ticker: str) -> dict:
