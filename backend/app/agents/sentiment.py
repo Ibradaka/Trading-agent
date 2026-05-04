@@ -158,7 +158,7 @@ async def _compute_and_cache(ticker: str, asset_id: str) -> None:
             await session.execute(
                 text("""
                     INSERT INTO sentiment_cache (asset_id, timestamp, sentiment_score, key_themes, sources, expires_at)
-                    VALUES (:asset_id, :ts, :score, :themes::jsonb, :sources::jsonb, :expires)
+                    VALUES (:asset_id, :ts, :score, cast(:themes as jsonb), cast(:sources as jsonb), :expires)
                     ON CONFLICT (asset_id, timestamp) DO NOTHING
                 """),
                 {

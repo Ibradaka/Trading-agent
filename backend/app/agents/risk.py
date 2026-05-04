@@ -301,9 +301,9 @@ async def _write_signal(
                 :signal_type, :strength,
                 :composite_score, :technical_score, :pattern_score,
                 :sentiment_score, :macro_score, :momentum_score,
-                :confidence, :reasoning, :risks::jsonb,
+                :confidence, :reasoning, cast(:risks as jsonb),
                 :invalidation_conditions, :horizon,
-                :llm_raw_output::jsonb, TRUE
+                cast(:llm_raw_output as jsonb), TRUE
             )
         """),
         {
